@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>智能磨豆機</title>
+<style>
+  :root {
+    --bg:#0a0e14; --panel:#12171f; --border:#1e2733; --text:#dde1e8; --muted:#6b7280;
+    --accent:#3b82f6; --green:#10b981; --red:#ef4444; --orange:#f59e0b; --cyan:#06b6d4;
+    --radius:10px; --gap:14px;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+    background:var(--bg); color:var(--text); min-height:100dvh;
+    display:flex; flex-direction:column; align-items:center; padding:16px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:20px; width:100%; max-width:400px; }
+  h1 { font-size:1.2rem; text-align:center; margin-bottom:2px; }
+  .sub { text-align:center; font-size:0.7rem; color:var(--muted); margin-bottom:14px; }
+
+  /* ── standby ── */
+  .sb { display:flex; align-items:center; gap:10px; margin-bottom:14px; padding:12px;
+    background:rgba(59,130,246,0.05); border-radius:8px; border:1px solid var(--border); }
+  .sb.low { background:rgba(239,68,68,0.06); border-color:rgba(239,68,68,0.2); }
+  .sb-ico { font-size:1.4rem; }
+  .sb-info { flex:1; min-width:0; }
+  .sb-ttl { font-size:1.1rem; font-weight:800; font-variant-numeric:tabular-nums; }
+  .sb-sub { font-size:0.68rem; color:var(--muted); margin-top:1px; }
+  .sb-r { display:flex; gap:6px; }
+  .sb-r button { padding:8px 12px; font-size:0.75rem; }
+
+  /* ── 連線指示 ── */
+  .conn { text-align:center; font-size:0.7rem; margin-bottom:12px; }
+  .conn .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+  .conn.ok .dot { background:var(--green); }
+  .conn.bad .dot { background:var(--red); }
+
+  /* ── 旋鈕 ── */
+  .knob-wrap { position:relative; display:flex; justify-content:center; margin:6px 0; }
+  .knob { width:100%; max-width:240px; cursor:grab; touch-action:none; user-select:none; }
+  .knob:active { cursor:grabbing; }
+  .k-track { fill:none; stroke:#1a2130; stroke-width:14; stroke-linecap:round;
+    stroke-dasharray:452.39 603.19; transform:rotate(135deg); transform-origin:120px 120px; }
+  .k-fill { fill:none; stroke:var(--accent); stroke-width:14; stroke-linecap:round;
+    stroke-dasharray:0 603.19; transform:rotate(135deg); transform-origin:120px 120px;
+    transition:stroke-dasharray 0.08s linear; filter:drop-shadow(0 0 6px rgba(59,130,246,0.5)); }
+  .k-ptr { stroke:var(--text); stroke-width:3; stroke-linecap:round;
+    transform-origin:120px 120px; transition:transform 0.08s linear; }
+  .k-hub { fill:var(--panel); stroke:var(--border); stroke-width:1; }
+  .knob-read { position:absolute; top:50%; left:50%; transform:translate(-50%,-46%);
+    text-align:center; pointer-events:none; }
+  .kr-val { font-size:2.4rem; font-weight:800; line-height:1; font-variant-numeric:tabular-nums; }
+  .kr-unit { font-size:0.7rem; color:var(--muted); margin-top:2px; }
+
+  /* ── buttons ── */
+  .row { display:flex; justify-content:center; gap:8px; margin:8px 0; }
+  button { border:1px solid var(--border); background:var(--panel); color:var(--text);
+    border-radius:7px; padding:9px 16px; font-size:0.82rem; cursor:pointer;
+    transition:all 0.15s; font-family:inherit;
+    box-shadow:0 2px 0 rgba(0,0,0,0.3), 0 4px 8px rgba(0,0,0,0.2); }
+  button:hover { border-color:var(--accent); transform:translateY(-1px);
+    box-shadow:0 3px 0 rgba(0,0,0,0.3), 0 6px 12px rgba(0,0,0,0.25); }
+  button:active { transform:translateY(2px) scale(0.97);
+    box-shadow:0 0px 0 rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.15); }
+  button.go { background:var(--green); color:#06240f; border-color:var(--green);
+    font-size:0.95rem; padding:12px; font-weight:700;
+    box-shadow:0 3px 0 #0d8a5e, 0 6px 16px rgba(16,185,129,0.3); }
+  button.go:hover { border-color:#0d8a5e; box-shadow:0 4px 0 #0d8a5e, 0 8px 20px rgba(16,185,129,0.4); }
+  button.go:active { transform:translateY(3px);
+    box-shadow:0 0px 0 #0d8a5e, 0 2px 6px rgba(16,185,129,0.2); }
+  button.stop { background:var(--red); color:#fff; border-color:var(--red);
+    font-size:0.9rem; padding:12px; font-weight:700;
+    box-shadow:0 3px 0 #b91c1c, 0 6px 16px rgba(239,68,68,0.3); }
+  button.stop:hover { border-color:#f87171; box-shadow:0 4px 0 #b91c1c, 0 8px 24px rgba(239,68,68,0.5); }
+  button.stop:active { transform:translateY(3px);
+    box-shadow:0 0px 0 #b91c1c, 0 2px 6px rgba(239,68,68,0.2); }
+  button.go:disabled, button.stop:disabled {
+    opacity:0.35; cursor:not-allowed; transform:none;
+    box-shadow:0 2px 0 rgba(0,0,0,0.2), 0 3px 6px rgba(0,0,0,0.1); }
+  button.go:disabled:hover, button.stop:disabled:hover { border-color:inherit; }
+
+  /* stop 按鈕跑的時候閃爍 */
+  #gStop:not(:disabled) {
+    animation: stopPulse 1.5s ease-in-out infinite;
+  }
+  @keyframes stopPulse {
+    0%, 100% { box-shadow:0 3px 0 #b91c1c, 0 6px 16px rgba(239,68,68,0.3); }
+    50% { box-shadow:0 3px 0 #b91c1c, 0 8px 28px rgba(239,68,68,0.6); }
+  }
+
+  .dur-row { display:flex; gap:5px; margin-top:8px; flex-wrap:wrap; }
+  button.dur { flex:1; min-width:52px; padding:7px 4px; font-size:0.75rem; }
+  button.dur.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+  /* ── sliders ── */
+  .set-label { font-size:0.72rem; color:var(--muted); margin-bottom:3px; display:block; }
+  .set-row { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .set-row input[type=range] { flex:1; -webkit-appearance:none; height:5px;
+    background:#1a2130; border-radius:3px; }
+  .set-row input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:16px;
+    height:16px; border-radius:50%; background:var(--accent); cursor:pointer; }
+  .set-val { font-size:0.82rem; font-weight:700; min-width:32px; text-align:right;
+    font-variant-numeric:tabular-nums; }
+
+  .est { margin-top:10px; padding:8px; background:rgba(59,130,246,0.06); border-radius:6px;
+    font-size:0.72rem; color:var(--muted); text-align:center; }
+
+  /* ── progress ── */
+  .prog { margin-top:10px; display:none; }
+  .prog-bar { height:6px; background:#1a2130; border-radius:3px; overflow:hidden; }
+  .prog-in { height:100%; width:0%; background:var(--green); transition:width 0.15s linear; }
+  .prog-in.on { background:var(--red); }
+  .prog-txt { text-align:center; font-size:0.72rem; color:var(--muted); margin-top:5px;
+    font-variant-numeric:tabular-nums; }
+
+  /* ── counter ── */
+  .counter { text-align:center; font-size:0.72rem; color:var(--muted); margin-top:10px; }
+
+  /* ── mac ── */
+  .mac-row { display:flex; align-items:center; gap:6px; margin-bottom:10px; }
+  .mac-row label { font-size:0.72rem; color:var(--muted); white-space:nowrap; }
+  .mac-row input { flex:1; padding:6px 8px; background:#0d1219; border:1px solid var(--border);
+    border-radius:5px; color:var(--text); font-size:0.75rem; font-family:monospace; text-align:center; }
+
+  @media (max-width:400px) {
+    .card { padding:14px; }
+    .knob { max-width:200px; }
+    .kr-val { font-size:2rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>☕ 智能磨豆機</h1>
+  <div class="sub">雲端版 · 開網頁就能控</div>
+
+  <div class="mac-row">
+    <label>設備</label>
+    <input type="text" id="macInput" maxlength="12" autocomplete="off">
+  </div>
+
+  <div class="conn" id="conn">
+    <span class="dot"></span><span id="connTxt">連線中…</span>
+  </div>
+
+  <!-- standby timer -->
+  <div class="sb" id="sbPanel">
+    <div class="sb-ico" id="sbIco">🌙</div>
+    <div class="sb-info">
+      <div class="sb-ttl" id="sbTtl">未待機</div>
+      <div class="sb-sub" id="sbSub">按 ＋1 小時，時間到自動斷電</div>
+    </div>
+    <div class="sb-r">
+      <button id="sbAdd">＋1 小時</button>
+      <button id="sbOff" disabled class="stop" style="font-size:0.75rem;padding:8px 12px">下班</button>
+    </div>
+  </div>
+
+  <!-- knob -->
+  <div class="knob-wrap">
+    <svg class="knob" id="knob" viewBox="0 0 240 240">
+      <circle class="k-track" cx="120" cy="120" r="96"/>
+      <circle class="k-fill" id="kFill" cx="120" cy="120" r="96"/>
+      <g id="kTicks"></g>
+      <line class="k-ptr" id="kPtr" x1="120" y1="120" x2="120" y2="42"/>
+      <circle class="k-hub" cx="120" cy="120" r="58"/>
+    </svg>
+    <div class="knob-read">
+      <div class="kr-val" id="kVal">4.0</div>
+      <div class="kr-unit">秒 / 每次</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <button id="kMinus">− 0.1</button>
+    <button id="kPlus">+ 0.1</button>
+  </div>
+
+  <!-- loop settings -->
+  <span class="set-label">間隔冷卻（秒）— 每次磨完停多久散熱</span>
+  <div class="set-row">
+    <input type="range" id="sOff" min="1" max="60" value="20" step="1">
+    <span class="set-val" id="sOffV">20</span>
+  </div>
+
+  <span class="set-label">磨多久後自動停</span>
+  <div class="dur-row">
+    <button class="dur" data-m="0">一直磨</button>
+    <button class="dur" data-m="1">1 分</button>
+    <button class="dur active" data-m="5">5 分</button>
+    <button class="dur" data-m="10">10 分</button>
+    <button class="dur" data-m="30">30 分</button>
+  </div>
+  <div class="est" id="gEst">—</div>
+
+  <!-- start / stop -->
+  <div class="row" style="margin-top:12px">
+    <button class="go" id="gStart" style="flex:1">▶ 開始磨</button>
+    <button class="stop" id="gStop" disabled style="flex:0 0 90px">■ 停</button>
+  </div>
+
+  <!-- progress -->
+  <div class="prog" id="gProg">
+    <div class="prog-bar"><div class="prog-in" id="gBar"></div></div>
+    <div class="prog-txt" id="gTxt">—</div>
+  </div>
+
+  <!-- counter -->
+  <div class="counter" id="counter">本次已磨 0 次</div>
+  <div style="text-align:center;margin-top:6px">
+    <button id="cntReset" style="font-size:0.68rem;padding:4px 10px;border-color:var(--red);color:var(--red)">歸零</button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+
+// ── MQTT ──
+let client = null, connected = false;
+const BROKER_WS = 'wss://broker.hivemq.com:8884/mqtt';
+const _macDefault = localStorage.getItem('clientMac') || '8cce4e516285';
+$('#macInput').value = _macDefault;
+
+function getMac(){ return $('#macInput').value.trim().toLowerCase().replace(/:/g, '') || _macDefault; }
+function cmdTopic(){ return 'device/status/' + getMac(); }
+function stateTopic(){ return 'device/control/' + getMac(); }
+
+function setConn(ok, txt){
+  connected = ok;
+  $('#conn').className = 'conn ' + (ok ? 'ok' : 'bad');
+  $('#connTxt').textContent = txt;
+}
+
+function connect(){
+  if (client) client.end();
+  setConn(false, '連線中…');
+  client = mqtt.connect(BROKER_WS, {clientId: 'c_' + getMac() + '_' + Date.now()});
+  client.on('connect', () => {
+    setConn(true, '✅ 已連線');
+    client.subscribe(stateTopic());
+    client.publish(cmdTopic(), JSON.stringify({messageId:'hello',type:'info'}));
+  });
+  client.on('message', (topic, msg) => {
+    try { const d = JSON.parse(msg.toString()); if (typeof d.key !== 'undefined') _relayState = d.key; } catch(e) {}
+  });
+  client.on('close', () => { setConn(false, '❌ 斷線 · 重連中…'); setTimeout(connect, 3000); });
+  client.on('error', () => {});
+}
+connect();
+
+$('#macInput').onchange = () => { localStorage.setItem('clientMac', getMac()); connect(); };
+
+// ── 旋鈕 1.0–9.9 ──
+const K_MIN=1.0, K_MAX=9.9, K_ARC=270, K_R=96, K_C=2*Math.PI*K_R, K_ARC_LEN=K_C*K_ARC/360;
+let kv = 4.0;
+
+(function ticks(){
+  let h='';
+  for(let s=1;s<=9;s++){
+    const a=(135+(s-K_MIN)/(K_MAX-K_MIN)*K_ARC)*Math.PI/180;
+    const [c,si]=[Math.cos(a),Math.sin(a)];
+    h+=`<line class="k-tick maj" x1="${120+c*80}" y1="${120+si*80}" x2="${120+c*72}" y2="${120+si*72}"/>`;
+    h+=`<text class="k-lbl" x="${120+c*66}" y="${120+si*66+4}">${s}</text>`;
+  }
+  $('#kTicks').innerHTML = h;
+})();
+
+function kRender(){
+  const f=(kv-K_MIN)/(K_MAX-K_MIN);
+  $('#kFill').style.strokeDasharray=`${K_ARC_LEN*f} ${K_C}`;
+  $('#kFill').style.stroke=kv>=7?'var(--orange)':kv<=2?'var(--cyan)':'var(--accent)';
+  $('#kPtr').style.transform=`rotate(${135+f*K_ARC+90}deg)`;
+  $('#kVal').textContent=kv.toFixed(1);
+  estimate();
+}
+function kSet(v){ kv=Math.min(K_MAX,Math.max(K_MIN,Math.round(v*10)/10)); kRender(); }
+$('#kPlus').onclick=()=>kSet(kv+0.1);
+$('#kMinus').onclick=()=>kSet(kv-0.1);
+
+let dragging=false;
+function fromPoint(e){
+  const r=$('#knob').getBoundingClientRect();
+  const p=e.touches?e.touches[0]:e;
+  let deg=Math.atan2(p.clientY-(r.top+r.height/2),p.clientX-(r.left+r.width/2))*180/Math.PI;
+  deg=(deg-135+360)%360; if(deg>K_ARC)return;
+  kSet(K_MIN+deg/K_ARC*(K_MAX-K_MIN));
+}
+$('#knob').addEventListener('pointerdown',e=>{dragging=true;$('#knob').setPointerCapture(e.pointerId);fromPoint(e);});
+$('#knob').addEventListener('pointermove',e=>dragging&&fromPoint(e));
+$('#knob').addEventListener('pointerup',()=>dragging=false);
+$('#knob').addEventListener('wheel',e=>{e.preventDefault();kSet(kv+(e.deltaY<0?0.1:-0.1));},{passive:false});
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight'||e.key==='ArrowUp'){e.preventDefault();kSet(kv+0.1);}
+  if(e.key==='ArrowLeft'||e.key==='ArrowDown'){e.preventDefault();kSet(kv-0.1);}
+});
+
+// ── 循環設定 ──
+let grindMins = 5;
+function estimate(){
+  const off=+$('#sOff').value; $('#sOffV').textContent=off;
+  if(grindMins===0) $('#gEst').innerHTML=`一直磨到你按停 · 每圈 <b style="color:var(--text)">${kv.toFixed(1)}s 磨 + ${off}s 停</b>`;
+  else {
+    const cyc=Math.max(1,Math.round(grindMins*60/(kv+off)));
+    $('#gEst').innerHTML=`磨 <b style="color:var(--text)">${grindMins} 分鐘</b> · 約 <b style="color:var(--text)">${cyc}</b> 圈`;
+  }
+}
+$('#sOff').oninput=()=>estimate();
+document.querySelectorAll('.dur').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.dur').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); grindMins=+b.dataset.m; estimate();
+});
+
+// ── 待機 timer（+1小時，上限5hr） ──
+let standbyUntil = null, sbInterval = null;
+function hms(s){ const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;
+  return h?`${h}:${String(m).padStart(2,'0')}:${String(x).padStart(2,'0')}`:`${m}:${String(x).padStart(2,'0')}`; }
+function sbRender(){
+  const left = standbyUntil ? Math.max(0, Math.round(standbyUntil - Date.now()/1000)) : 0;
+  if(left <= 0 && standbyUntil){ standbyUntil = null; sbRender(); return; }
+  const p = $('#sbPanel'), armed = standbyUntil !== null;
+  $('#sbOff').disabled = !armed;
+  if(!armed){
+    p.className='sb'; $('#sbIco').textContent='🌙';
+    $('#sbTtl').textContent='未待機'; $('#sbSub').textContent='按 ＋1 小時，時間到自動斷電';
+    $('#sbAdd').disabled = false;
+    return;
+  }
+  const low = left < 300;
+  p.className='sb'+(low?' low':'');
+  $('#sbIco').textContent=low?'⏰':'☀️'; $('#sbTtl').textContent=hms(left);
+  $('#sbSub').textContent=low?'快到了 － 要加班再按 ＋1 小時':'待機中 · 時間到自動斷電';
+  $('#sbAdd').disabled = left >= 5*3600; // 上限5小時
+}
+$('#sbAdd').onclick=()=>{
+  const base = standbyUntil || Date.now()/1000;
+  standbyUntil = Math.min(base + 3600, Date.now()/1000 + 5*3600);
+  sbRender();
+  if(!sbInterval) sbInterval = setInterval(sbRender, 1000);
+};
+$('#sbOff').onclick=()=>{
+  if(!confirm('結束待機並斷電？')) return;
+  standbyUntil = null; send(0); sbRender();
+};
+sbRender();
+
+// ── 開始 / 停止 ──
+let grinding=false, stopFlag=false, grindCount=0, grindTimer=null, safetyTimer=null,_relayState=0;
+
+$('#counter').textContent = '本次已磨 0 次';
+
+function send(key){
+  if(!client||!connected) return;
+  client.publish(cmdTopic(), JSON.stringify({type:'event',key:key,messageId:'c_'+Date.now()}));
+}
+function clearTimers(){ clearTimeout(grindTimer); clearTimeout(safetyTimer); grindTimer=null;safetyTimer=null; }
+
+$('#gStart').onclick=()=>{
+  if(grinding) return;
+  if(!connected) return alert('尚未連線');
+  stopFlag=false; grinding=true;
+  $('#gStart').disabled=true; $('#gStop').disabled=false;
+  $('#gProg').style.display='block';
+
+  const offSec=+$('#sOff').value, totalMin=grindMins, startedAt=Date.now();
+  let cycle=0;
+
+  function loop(){
+    if(stopFlag||!connected){ send(0); finish(); return; }
+    if(totalMin>0 && (Date.now()-startedAt)>=totalMin*60000){ send(0); finish(); return; }
+
+    cycle++; grindCount++;
+    $('#counter').textContent = '本次已磨 ' + grindCount + ' 次';
+
+    // 進度
+    const elapsed=(Date.now()-startedAt)/1000, total=totalMin*60;
+    const pct=totalMin?Math.min(100,(elapsed/total)*100):50;
+    $('#gBar').style.width=pct+'%'; $('#gBar').className='prog-in';
+    $('#gTxt').textContent = '🔴 第 ' + cycle + ' 圈 · 磨 ' + kv.toFixed(1) + 's';
+
+    // ON
+    send(1);
+    safetyTimer=setTimeout(()=>send(0),(kv+0.5)*1000);
+    grindTimer=setTimeout(()=>{
+      clearTimeout(safetyTimer);
+      send(0);
+      $('#gBar').className='prog-in on';
+      $('#gTxt').textContent = '🔵 冷卻 ' + offSec + 's…';
+      grindTimer=setTimeout(()=>loop(),offSec*1000);
+    },kv*1000);
+  }
+  function finish(){
+    clearTimers(); grinding=false;
+    $('#gStart').disabled=false; $('#gStop').disabled=true;
+    $('#gProg').style.display='none';
+  }
+  loop();
+};
+
+$('#gStop').onclick=()=>{
+  stopFlag=true; clearTimers(); send(0);
+  grinding=false;
+  $('#gStart').disabled=false; $('#gStop').disabled=true;
+  $('#gProg').style.display='none';
+};
+$('#cntReset').onclick=()=>{
+  if(!confirm('歸零計數器？\n\n累計 ' + grindCount + ' 次')) return;
+  grindCount=0;
+  $('#counter').textContent='本次已磨 0 次';
+};
+
+// ── 待機到期：強制停 ──
+setInterval(()=>{
+  if(standbyUntil && Date.now()/1000 >= standbyUntil){
+    standbyUntil=null; stopFlag=true; clearTimers(); send(0);
+    grinding=false; $('#gStart').disabled=false; $('#gStop').disabled=true;
+    $('#gProg').style.display='none'; sbRender();
+  }
+}, 1000);
+
+setInterval(()=>{ if(standbyUntil) sbRender(); }, 1000);
+
+kRender(); estimate();
+</script>
+</body>
+</html>
