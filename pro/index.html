@@ -121,6 +121,20 @@
   .watt { margin-left:auto; font-size:.8rem; color:var(--muted);
     font-variant-numeric:tabular-nums; padding:2px 8px; border:1px solid var(--border);
     border-radius:99px; }
+  .gear { background:none; border:1px solid var(--border); color:var(--muted);
+    border-radius:8px; padding:4px 8px; font-size:.95rem; cursor:pointer; }
+  .cfg { background:#0d1219; border:1px solid var(--border); border-radius:10px;
+    padding:12px; margin-bottom:10px; }
+  .cfg-hint { font-size:.72rem; color:var(--muted); margin-bottom:8px; line-height:1.5; }
+  .cfg label { display:block; font-size:.72rem; color:var(--muted); margin-bottom:7px; }
+  .cfg input { width:100%; margin-top:3px; padding:8px; background:#0a0e14;
+    border:1px solid var(--border); border-radius:6px; color:var(--text);
+    font-size:.85rem; font-family:ui-monospace,Menlo,monospace; }
+  .cfg-btns { display:flex; gap:8px; margin-top:4px; }
+  .cfg-btns button { flex:1; padding:9px; border-radius:8px; border:none;
+    font-size:.85rem; font-weight:600; cursor:pointer; }
+  .cfg-ok { background:var(--accent); color:#fff; }
+  .cfg-no { background:#1e2733; color:var(--muted); }
   .mac-row { display:flex; align-items:center; gap:6px; margin-bottom:10px; }
   .mac-row label { font-size:0.72rem; color:var(--muted); white-space:nowrap; }
   .mac-row input { flex:1; padding:6px 8px; background:#0d1219; border:1px solid var(--border);
@@ -144,6 +158,21 @@
     <input type="text" id="macInput" maxlength="32" autocomplete="off"
            placeholder="gr-xxxxxxxxxx" spellcheck="false">
     <span id="wattBadge" class="watt">—</span>
+    <button id="cfgToggle" class="gear" title="連線設定">⚙️</button>
+  </div>
+
+  <!-- 手動連線設定（QR 掃不到 / 換裝置時用） -->
+  <div id="cfgPanel" class="cfg" style="display:none">
+    <div class="cfg-hint">沒有用專屬連結開啟時，可在這裡手動填。存在這支手機上。</div>
+    <label>Broker 主機<input id="cfgHost" placeholder="xxxx.s1.eu.hivemq.cloud" spellcheck="false"></label>
+    <label>WebSocket 埠<input id="cfgPort" placeholder="8884" inputmode="numeric"></label>
+    <label>帳號<input id="cfgUser" spellcheck="false" autocomplete="off"></label>
+    <label>密碼<input id="cfgPass" type="password" autocomplete="off"></label>
+    <label>設備主題<input id="cfgTopic" placeholder="gr-xxxxxxxxxx" spellcheck="false"></label>
+    <div class="cfg-btns">
+      <button id="cfgSave" class="cfg-ok">儲存並連線</button>
+      <button id="cfgClear" class="cfg-no">清除</button>
+    </div>
   </div>
 
   <div class="conn" id="conn">
@@ -242,7 +271,8 @@ const CFG = {
   topic: cfgGet('topic'),
   guard: parseFloat(cfgGet('guard', '11')),   // PulseTime 看門狗秒數
 };
-const BROKER_WS = CFG.host ? `wss://${CFG.host}:${CFG.port}/mqtt` : '';
+function brokerUrl(){ return CFG.host ? `wss://${CFG.host}:${CFG.port||8884}/mqtt` : ''; }
+let BROKER_WS = brokerUrl();
 const _macDefault = CFG.topic || localStorage.getItem('gp_topic') || '';
 $('#macInput').value = _macDefault;
 
@@ -273,6 +303,7 @@ function connect(){
     setConn(false, '⚠️ 尚未設定連線（請用含參數的連結開啟）');
     return;
   }
+  BROKER_WS = brokerUrl();
   client = mqtt.connect(BROKER_WS, {
     clientId: 'gp_' + devTopic() + '_' + Date.now(),
     username: CFG.user || undefined,
@@ -512,6 +543,44 @@ document.addEventListener('visibilitychange', () => {
     connect();
   }
 });
+
+
+// ── 手動連線設定 ──
+const cfgFields = {host:'cfgHost', port:'cfgPort', user:'cfgUser', pass:'cfgPass', topic:'cfgTopic'};
+function cfgLoad(){
+  for (const [k, id] of Object.entries(cfgFields)) {
+    const el = document.getElementById(id);
+    if (el) el.value = (k === 'port') ? (CFG.port || '8884') : (CFG[k] || '');
+  }
+}
+document.getElementById('cfgToggle').onclick = () => {
+  const p = document.getElementById('cfgPanel');
+  const show = p.style.display === 'none';
+  if (show) cfgLoad();
+  p.style.display = show ? 'block' : 'none';
+};
+document.getElementById('cfgSave').onclick = () => {
+  for (const [k, id] of Object.entries(cfgFields)) {
+    const v = document.getElementById(id).value.trim();
+    CFG[k] = v;
+    localStorage.setItem('gp_' + k, v);
+  }
+  CFG.port = CFG.port || '8884';
+  if (!CFG.host || !CFG.topic) { alert('主機與設備主題必填'); return; }
+  document.getElementById('macInput').value = CFG.topic;
+  document.getElementById('cfgPanel').style.display = 'none';
+  location.search = '';                 // 清掉網址參數，改用已存設定重載
+};
+document.getElementById('cfgClear').onclick = () => {
+  if (!confirm('清除這支手機上存的連線設定？')) return;
+  Object.keys(cfgFields).forEach(k => localStorage.removeItem('gp_' + k));
+  location.search = '';
+};
+// 沒設定好就自動把設定面板打開，不讓使用者卡在「尚未設定連線」
+if (!CFG.host || !CFG.topic) {
+  document.getElementById('cfgPanel').style.display = 'block';
+  cfgLoad();
+}
 
 kRender(); estimate();
 </script>
