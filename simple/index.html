@@ -64,6 +64,7 @@ const CFG = {
   onSec: parseFloat(cfgGet('on',  cfgGet('on_sec', '4'))),
   coolSec: parseFloat(cfgGet('cool', cfgGet('cool_sec', '30'))),
   guard: parseFloat(cfgGet('guard', '8')),
+  loop: parseInt(cfgGet('loop', '0')) === 1,
 };
 
 if (!CFG.topic) {
@@ -72,7 +73,7 @@ if (!CFG.topic) {
   throw new Error('missing topic');
 }
 
-document.getElementById('info').textContent = '插座：' + CFG.topic + '｜運轉 ' + CFG.onSec + 's｜冷卻 ' + CFG.coolSec + 's';
+document.getElementById('info').textContent = '插座：' + CFG.topic + '｜運轉 ' + CFG.onSec + 's｜冷卻 ' + CFG.coolSec + 's' + (CFG.loop ? '｜循環模式' : '');
 
 const brokerUrl = () => 'wss://' + CFG.host + ':' + CFG.port + '/mqtt';
 const tCmnd = (sub) => 'cmnd/' + CFG.topic + '/' + sub;
@@ -86,6 +87,7 @@ let autoOffTimer = null;
 let cooldownTimer = null;
 let startTs = 0;
 let wakeLock = null;
+let loopCount = 0;
 
 function setStatus(text, type) {
   document.getElementById('statusText').textContent = text;
@@ -119,12 +121,16 @@ function setOnEnabled(enabled) {
 }
 
 function startCooldown() {
+  setOnEnabled(false);
   if (CFG.coolSec <= 0) {
-    setOnEnabled(true);
-    setMsg('可以再次按 ON');
+    if (CFG.loop) {
+      setTimeout(function() { sendPower('ON'); }, 300);
+    } else {
+      setOnEnabled(true);
+      setMsg('可以再次按 ON');
+    }
     return;
   }
-  setOnEnabled(false);
   const coolEndTs = Date.now() + CFG.coolSec * 1000;
   document.getElementById('cooldown').textContent = '冷卻中：' + CFG.coolSec.toFixed(0) + 's';
   cooldownTimer = setInterval(function() {
@@ -132,9 +138,13 @@ function startCooldown() {
     if (remain <= 0) {
       clearInterval(cooldownTimer);
       cooldownTimer = null;
-      setOnEnabled(true);
       document.getElementById('cooldown').textContent = '';
-      setMsg('可以再次按 ON');
+      if (CFG.loop) {
+        setTimeout(function() { sendPower('ON'); }, 300);
+      } else {
+        setOnEnabled(true);
+        setMsg('可以再次按 ON');
+      }
     } else {
       document.getElementById('cooldown').textContent = '冷卻中：' + remain.toFixed(0) + 's';
     }
@@ -171,11 +181,12 @@ function sendPower(state) {
   client.publish(tCmnd('POWER'), state, { qos: 1 });
 
   if (state === 'ON') {
-    if (cycleActive) return; // ignore duplicate ON
+    if (cycleActive) return;
     cycleActive = true;
+    loopCount += 1;
     clearAllTimers();
     setOnEnabled(false);
-    setMsg('運轉中...');
+    setMsg('運轉中...' + (CFG.loop ? '（第 ' + loopCount + ' 次）' : ''));
     acquireWakeLock();
     startDisplay();
     autoOffTimer = setTimeout(function() {
@@ -184,7 +195,6 @@ function sendPower(state) {
       }
     }, CFG.onSec * 1000);
   } else {
-    // OFF pressed or auto-off sent
     if (!cycleActive) return;
     clearAllTimers();
     cycleEnd('已停止');
@@ -203,7 +213,7 @@ function connect() {
 
   client.on('connect', function() {
     setStatus('已連線', 'off');
-    setMsg('按綠色 ON 開始 ' + CFG.onSec + ' 秒磨豆');
+    setMsg('按綠色 ON 開始 ' + (CFG.loop ? '循環' : CFG.onSec + ' 秒磨豆'));
     client.subscribe(tStat('POWER'));
     client.publish(tCmnd('PulseTime'), String(guardToPulseTime(Math.max(CFG.guard, CFG.onSec + 2))), { qos: 1 });
     client.publish(tCmnd('POWER'), '', { qos: 1 });
@@ -228,7 +238,10 @@ function connect() {
 }
 
 document.getElementById('btn-on').addEventListener('click', function() { sendPower('ON'); });
-document.getElementById('btn-off').addEventListener('click', function() { sendPower('OFF'); });
+document.getElementById('btn-off').addEventListener('click', function() {
+  loopCount = 0;
+  sendPower('OFF');
+});
 
 // Safety: auto-OFF if tab hidden / page closed
 document.addEventListener('visibilitychange', function() {
