@@ -13,36 +13,39 @@
       padding: 20px; overflow: hidden;
     }
     #status {
-      font-size: 2rem; font-weight: 700; margin-bottom: 12px;
+      font-size: 2rem; font-weight: 700; margin-bottom: 8px;
       display: flex; align-items: center; gap: 10px;
     }
     #dot { width: 18px; height: 18px; border-radius: 50%; background: #6b7280; }
     #dot.on { background: #22c55e; box-shadow: 0 0 16px #22c55e; }
     #dot.off { background: #6b7280; }
-    #msg { font-size: 1.1rem; color: #9ca3af; margin-bottom: 40px; min-height: 1.5em; }
+    #msg { font-size: 1.1rem; color: #9ca3af; margin-bottom: 24px; min-height: 1.5em; text-align: center; }
+    #timer { font-size: 4rem; font-weight: 900; margin-bottom: 24px; color: #f59e0b; font-variant-numeric: tabular-nums; min-height: 1.2em; }
     .btn {
       width: 100%; max-width: 340px; height: 160px; border: none; border-radius: 24px;
       font-size: 3rem; font-weight: 800; color: #fff; cursor: pointer;
       margin: 12px 0; user-select: none; -webkit-tap-highlight-color: transparent;
-      transition: transform 0.08s, filter 0.15s;
+      transition: transform 0.08s, filter 0.15s, opacity 0.2s;
     }
-    .btn:active { transform: scale(0.96); }
+    .btn:disabled { opacity: 0.35; cursor: not-allowed; filter: grayscale(0.6); }
+    .btn:active:not(:disabled) { transform: scale(0.96); }
     #btn-on { background: linear-gradient(180deg, #22c55e, #16a34a); box-shadow: 0 8px 0 #14532d, 0 16px 32px rgba(34,197,94,0.25); }
-    #btn-on:active { box-shadow: 0 4px 0 #14532d, 0 8px 16px rgba(34,197,94,0.25); transform: translateY(4px) scale(0.96); }
+    #btn-on:active:not(:disabled) { box-shadow: 0 4px 0 #14532d, 0 8px 16px rgba(34,197,94,0.25); transform: translateY(4px) scale(0.96); }
     #btn-off { background: linear-gradient(180deg, #ef4444, #dc2626); box-shadow: 0 8px 0 #7f1d1d, 0 16px 32px rgba(239,68,68,0.25); }
-    #btn-off:active { box-shadow: 0 4px 0 #7f1d1d, 0 8px 16px rgba(239,68,68,0.25); transform: translateY(4px) scale(0.96); }
-    #timer { font-size: 4rem; font-weight: 900; margin-top: 30px; color: #f59e0b; font-variant-numeric: tabular-nums; }
-    #info { position: fixed; bottom: 14px; font-size: 0.8rem; color: #4b5563; }
+    #btn-off:active:not(:disabled) { box-shadow: 0 4px 0 #7f1d1d, 0 8px 16px rgba(239,68,68,0.25); transform: translateY(4px) scale(0.96); }
+    #info { position: fixed; bottom: 14px; font-size: 0.8rem; color: #4b5563; text-align: center; }
+    #cooldown { font-size: 1.2rem; color: #f59e0b; margin-top: 8px; }
   </style>
 </head>
 <body>
   <div id="status"><div id="dot" class="off"></div><span id="statusText">連線中...</span></div>
   <div id="msg">請稍候</div>
+  <div id="timer"></div>
 
   <button id="btn-on" class="btn">▶ ON</button>
   <button id="btn-off" class="btn">⏹ OFF</button>
+  <div id="cooldown"></div>
 
-  <div id="timer"></div>
   <div id="info"></div>
 
 <script src="https://unpkg.com/mqtt/dist/mqtt.js"></script>
@@ -58,6 +61,8 @@ const CFG = {
   user:  cfgGet('user',  'grinder1'),
   pass:  cfgGet('pass',  'xExk7cALBYocFyhw'),
   topic: cfgGet('t',     cfgGet('topic', '')),
+  onSec: parseFloat(cfgGet('on',  cfgGet('on_sec', '4'))),
+  coolSec: parseFloat(cfgGet('cool', cfgGet('cool_sec', '30'))),
   guard: parseFloat(cfgGet('guard', '8')),
 };
 
@@ -67,7 +72,7 @@ if (!CFG.topic) {
   throw new Error('missing topic');
 }
 
-document.getElementById('info').textContent = '插座：' + CFG.topic;
+document.getElementById('info').textContent = '插座：' + CFG.topic + '｜運轉 ' + CFG.onSec + 's｜冷卻 ' + CFG.coolSec + 's';
 
 const brokerUrl = () => 'wss://' + CFG.host + ':' + CFG.port + '/mqtt';
 const tCmnd = (sub) => 'cmnd/' + CFG.topic + '/' + sub;
@@ -76,14 +81,10 @@ const tStat = (sub) => 'stat/' + CFG.topic + '/' + sub;
 let client = null;
 let powerState = false;
 let secondsTimer = null;
+let cooldownTimer = null;
 let startTs = 0;
+let coolEndTs = 0;
 let wakeLock = null;
-
-// Web Worker for reliable background timer
-const workerScript = 'let timer = null; self.onmessage = function(e){ if(e.data==="start"){ if(timer) clearTimeout(timer); timer = setTimeout(function(){ self.postMessage("timeout"); timer=null; }, 8000); } if(e.data==="clear"){ if(timer) clearTimeout(timer); timer=null; } };';
-const workerBlob = new Blob([workerScript], { type: 'application/javascript' });
-const worker = new Worker(URL.createObjectURL(workerBlob));
-worker.onmessage = function() { sendPower('OFF'); };
 
 function setStatus(text, type) {
   document.getElementById('statusText').textContent = text;
@@ -94,9 +95,10 @@ function setMsg(text) { document.getElementById('msg').textContent = text; }
 
 function startTimerDisplay() {
   startTs = Date.now();
-  document.getElementById('timer').textContent = '0.0s';
+  document.getElementById('timer').textContent = CFG.onSec.toFixed(1) + 's';
   secondsTimer = setInterval(function() {
-    document.getElementById('timer').textContent = ((Date.now() - startTs) / 1000).toFixed(1) + 's';
+    const remain = Math.max(0, CFG.onSec - (Date.now() - startTs) / 1000);
+    document.getElementById('timer').textContent = remain.toFixed(1) + 's';
   }, 100);
 }
 
@@ -104,6 +106,29 @@ function stopTimerDisplay() {
   if (secondsTimer) clearInterval(secondsTimer);
   secondsTimer = null;
   document.getElementById('timer').textContent = '';
+}
+
+function setOnEnabled(enabled) {
+  const btn = document.getElementById('btn-on');
+  btn.disabled = !enabled;
+}
+
+function startCooldown() {
+  coolEndTs = Date.now() + CFG.coolSec * 1000;
+  setOnEnabled(false);
+  document.getElementById('cooldown').textContent = '冷卻中：' + CFG.coolSec.toFixed(0) + 's';
+  cooldownTimer = setInterval(function() {
+    const remain = Math.max(0, coolEndTs - Date.now()) / 1000;
+    if (remain <= 0) {
+      clearInterval(cooldownTimer);
+      cooldownTimer = null;
+      setOnEnabled(true);
+      document.getElementById('cooldown').textContent = '';
+      setMsg('可以再次按 ON');
+    } else {
+      document.getElementById('cooldown').textContent = '冷卻中：' + remain.toFixed(0) + 's';
+    }
+  }, 500);
 }
 
 async function acquireWakeLock() {
@@ -130,16 +155,19 @@ function sendPower(state) {
     return;
   }
   client.publish(tCmnd('POWER'), state, { qos: 1 });
-  setMsg(state === 'ON' ? '已發送開啟指令' : '已發送關閉指令');
+  setMsg(state === 'ON' ? '運轉中...' : '已停止');
 
   if (state === 'ON') {
-    worker.postMessage('start');
     acquireWakeLock();
     startTimerDisplay();
+    // auto-OFF after onSec
+    setTimeout(function() {
+      if (powerState) sendPower('OFF');
+    }, CFG.onSec * 1000);
   } else {
-    worker.postMessage('clear');
     releaseWakeLock();
     stopTimerDisplay();
+    startCooldown();
   }
 
   if (navigator.vibrate) navigator.vibrate(40);
@@ -155,9 +183,9 @@ function connect() {
 
   client.on('connect', function() {
     setStatus('已連線', 'off');
-    setMsg('按綠色 ON 開始磨豆');
+    setMsg('按綠色 ON 開始 ' + CFG.onSec + ' 秒磨豆');
     client.subscribe(tStat('POWER'));
-    client.publish(tCmnd('PulseTime'), String(guardToPulseTime(CFG.guard)), { qos: 1 });
+    client.publish(tCmnd('PulseTime'), String(guardToPulseTime(Math.max(CFG.guard, CFG.onSec + 2))), { qos: 1 });
     client.publish(tCmnd('POWER'), '', { qos: 1 });
   });
 
@@ -170,7 +198,6 @@ function connect() {
       } else if (txt === 'OFF') {
         powerState = false;
         setStatus('已關閉', 'off');
-        worker.postMessage('clear');
         releaseWakeLock();
         stopTimerDisplay();
       }
@@ -182,9 +209,13 @@ function connect() {
 }
 
 document.getElementById('btn-on').addEventListener('click', function() { sendPower('ON'); });
-document.getElementById('btn-off').addEventListener('click', function() { sendPower('OFF'); });
+document.getElementById('btn-off').addEventListener('click', function() {
+  if (secondsTimer) clearTimeout(secondsTimer); // cancel pending auto-OFF
+  secondsTimer = null;
+  sendPower('OFF');
+});
 
-// Critical safety: if user switches tab / locks screen / closes page, turn OFF
+// Safety: auto-OFF if tab hidden / page closed
 document.addEventListener('visibilitychange', function() {
   if (document.hidden && powerState) {
     sendPower('OFF');
