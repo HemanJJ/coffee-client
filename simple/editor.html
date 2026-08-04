@@ -89,6 +89,10 @@
       <div class="hint">WebSocket 埠，通常 8884</div>
     </div>
   </div>
+  <div style="margin-top:16px;display:flex;align-items:center;gap:10px;">
+    <input type="checkbox" id="loop" style="width:auto;height:22px;">
+    <label for="loop" style="margin:0;">循環模式（按一次 ON 後自動重複 ON/OFF）</label>
+  </div>
 
   <div class="result">
     <label>產生的連結</label>
@@ -114,6 +118,7 @@ function getInputs() {
     cool: document.getElementById('coolSec').value,
     guard: document.getElementById('guard').value,
     port: document.getElementById('port').value,
+    loop: document.getElementById('loop').checked ? '1' : '0',
   };
 }
 
@@ -125,6 +130,7 @@ function buildUrl() {
   url.searchParams.set('cool', c.cool);
   url.searchParams.set('guard', c.guard);
   url.searchParams.set('port', c.port);
+  if (c.loop === '1') url.searchParams.set('loop', '1');
   return url.toString();
 }
 
@@ -167,6 +173,7 @@ function showQR() {
 }
 
 ['topic','onSec','coolSec','guard','port'].forEach(id => {
+  document.getElementById('loop').addEventListener('change', update);
   document.getElementById(id).addEventListener('input', update);
 });
 
