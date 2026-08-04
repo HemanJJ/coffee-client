@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>磨豆機開關</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: #0b0f14; color: #e5e7eb; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: 20px; overflow: hidden;
+    }
+    #status {
+      font-size: 2rem; font-weight: 700; margin-bottom: 12px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    #dot { width: 18px; height: 18px; border-radius: 50%; background: #6b7280; }
+    #dot.on { background: #22c55e; box-shadow: 0 0 16px #22c55e; }
+    #dot.off { background: #6b7280; }
+    #msg { font-size: 1.1rem; color: #9ca3af; margin-bottom: 40px; min-height: 1.5em; }
+    .btn {
+      width: 100%; max-width: 340px; height: 160px; border: none; border-radius: 24px;
+      font-size: 3rem; font-weight: 800; color: #fff; cursor: pointer;
+      margin: 12px 0; user-select: none; -webkit-tap-highlight-color: transparent;
+      transition: transform 0.08s, filter 0.15s;
+    }
+    .btn:active { transform: scale(0.96); }
+    #btn-on { background: linear-gradient(180deg, #22c55e, #16a34a); box-shadow: 0 8px 0 #14532d, 0 16px 32px rgba(34,197,94,0.25); }
+    #btn-on:active { box-shadow: 0 4px 0 #14532d, 0 8px 16px rgba(34,197,94,0.25); transform: translateY(4px) scale(0.96); }
+    #btn-off { background: linear-gradient(180deg, #ef4444, #dc2626); box-shadow: 0 8px 0 #7f1d1d, 0 16px 32px rgba(239,68,68,0.25); }
+    #btn-off:active { box-shadow: 0 4px 0 #7f1d1d, 0 8px 16px rgba(239,68,68,0.25); transform: translateY(4px) scale(0.96); }
+    #timer { font-size: 4rem; font-weight: 900; margin-top: 30px; color: #f59e0b; font-variant-numeric: tabular-nums; }
+    #info { position: fixed; bottom: 14px; font-size: 0.8rem; color: #4b5563; }
+  </style>
+</head>
+<body>
+  <div id="status"><div id="dot" class="off"></div><span id="statusText">連線中...</span></div>
+  <div id="msg">請稍候</div>
+
+  <button id="btn-on" class="btn">▶ ON</button>
+  <button id="btn-off" class="btn">⏹ OFF</button>
+
+  <div id="timer"></div>
+  <div id="info"></div>
+
+<script src="https://unpkg.com/mqtt/dist/mqtt.js"></script>
+<script>
+function cfgGet(key, def) {
+  const u = new URLSearchParams(location.search);
+  return u.has(key) ? u.get(key) : (localStorage.getItem('simple_'+key) || def);
+}
+
+const CFG = {
+  host:  cfgGet('host',  '591aad19d20d466896cf959108d5dc56.s1.eu.hivemq.cloud'),
+  port:  parseInt(cfgGet('port', '8884')),
+  user:  cfgGet('user',  'grinder1'),
+  pass:  cfgGet('pass',  'xExk7cALBYocFyhw'),
+  topic: cfgGet('t',     cfgGet('topic', '')),
+  guard: parseFloat(cfgGet('guard', '8')),
+};
+
+if (!CFG.topic) {
+  document.getElementById('statusText').textContent = '錯誤';
+  document.getElementById('msg').textContent = '連結缺少 topic 參數';
+  throw new Error('missing topic');
+}
+
+document.getElementById('info').textContent = '插座：' + CFG.topic;
+
+const brokerUrl = () => 'wss://' + CFG.host + ':' + CFG.port + '/mqtt';
+const tCmnd = (sub) => 'cmnd/' + CFG.topic + '/' + sub;
+const tStat = (sub) => 'stat/' + CFG.topic + '/' + sub;
+
+let client = null;
+let powerState = false;
+let secondsTimer = null;
+let startTs = 0;
+let wakeLock = null;
+
+// Web Worker for reliable background timer
+const workerScript = 'let timer = null; self.onmessage = function(e){ if(e.data==="start"){ if(timer) clearTimeout(timer); timer = setTimeout(function(){ self.postMessage("timeout"); timer=null; }, 8000); } if(e.data==="clear"){ if(timer) clearTimeout(timer); timer=null; } };';
+const workerBlob = new Blob([workerScript], { type: 'application/javascript' });
+const worker = new Worker(URL.createObjectURL(workerBlob));
+worker.onmessage = function() { sendPower('OFF'); };
+
+function setStatus(text, type) {
+  document.getElementById('statusText').textContent = text;
+  document.getElementById('dot').className = type === 'on' ? 'on' : type === 'off' ? 'off' : '';
+}
+
+function setMsg(text) { document.getElementById('msg').textContent = text; }
+
+function startTimerDisplay() {
+  startTs = Date.now();
+  document.getElementById('timer').textContent = '0.0s';
+  secondsTimer = setInterval(function() {
+    document.getElementById('timer').textContent = ((Date.now() - startTs) / 1000).toFixed(1) + 's';
+  }, 100);
+}
+
+function stopTimerDisplay() {
+  if (secondsTimer) clearInterval(secondsTimer);
+  secondsTimer = null;
+  document.getElementById('timer').textContent = '';
+}
+
+async function acquireWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+    }
+  } catch (e) { console.log('wakeLock', e); }
+}
+
+async function releaseWakeLock() {
+  try { if (wakeLock) { await wakeLock.release(); wakeLock = null; } }
+  catch (e) { console.log(e); }
+}
+
+function guardToPulseTime(sec) {
+  if (!sec || sec <= 0) return 0;
+  return sec <= 11.1 ? Math.max(1, Math.round(sec * 10)) : Math.round(sec) + 100;
+}
+
+function sendPower(state) {
+  if (!client || !client.connected) {
+    setMsg('尚未連線，請稍候');
+    return;
+  }
+  client.publish(tCmnd('POWER'), state, { qos: 1 });
+  setMsg(state === 'ON' ? '已發送開啟指令' : '已發送關閉指令');
+
+  if (state === 'ON') {
+    worker.postMessage('start');
+    acquireWakeLock();
+    startTimerDisplay();
+  } else {
+    worker.postMessage('clear');
+    releaseWakeLock();
+    stopTimerDisplay();
+  }
+
+  if (navigator.vibrate) navigator.vibrate(40);
+}
+
+function connect() {
+  client = mqtt.connect(brokerUrl(), {
+    clientId: 'simple-' + Math.random().toString(36).slice(2, 8),
+    username: CFG.user,
+    password: CFG.pass,
+    reconnectPeriod: 3000,
+  });
+
+  client.on('connect', function() {
+    setStatus('已連線', 'off');
+    setMsg('按綠色 ON 開始磨豆');
+    client.subscribe(tStat('POWER'));
+    client.publish(tCmnd('PulseTime'), String(guardToPulseTime(CFG.guard)), { qos: 1 });
+    client.publish(tCmnd('POWER'), '', { qos: 1 });
+  });
+
+  client.on('message', function(topic, payload) {
+    if (topic.endsWith('/POWER')) {
+      const txt = payload.toString().toUpperCase();
+      if (txt === 'ON') {
+        powerState = true;
+        setStatus('運轉中', 'on');
+      } else if (txt === 'OFF') {
+        powerState = false;
+        setStatus('已關閉', 'off');
+        worker.postMessage('clear');
+        releaseWakeLock();
+        stopTimerDisplay();
+      }
+    }
+  });
+
+  client.on('offline', function() { setStatus('離線', ''); setMsg('連線中斷'); });
+  client.on('error', function(e) { setMsg('連線錯誤'); console.error(e); });
+}
+
+document.getElementById('btn-on').addEventListener('click', function() { sendPower('ON'); });
+document.getElementById('btn-off').addEventListener('click', function() { sendPower('OFF'); });
+
+// Critical safety: if user switches tab / locks screen / closes page, turn OFF
+document.addEventListener('visibilitychange', function() {
+  if (document.hidden && powerState) {
+    sendPower('OFF');
+    setMsg('螢幕離開：已自動關閉');
+  }
+});
+window.addEventListener('beforeunload', function() {
+  if (powerState) sendPower('OFF');
+});
+window.addEventListener('pagehide', function() {
+  if (powerState) sendPower('OFF');
+});
+
+connect();
+</script>
+</body>
+</html>
