@@ -269,7 +269,7 @@ const CFG = {
   user:  cfgGet('user'),
   pass:  cfgGet('pass'),
   topic: cfgGet('topic'),
-  guard: parseFloat(cfgGet('guard', '11')),   // PulseTime 看門狗秒數
+  guard: parseFloat(cfgGet('guard', '8')),   // PulseTime 看門狗秒數
 };
 function brokerUrl(){ return CFG.host ? `wss://${CFG.host}:${CFG.port||8884}/mqtt` : ''; }
 let BROKER_WS = brokerUrl();
