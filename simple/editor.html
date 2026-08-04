@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>磨豆機簡易連結產生器</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      background: #0b0f14; color: #e5e7eb;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: 24px; max-width: 640px; margin: 0 auto;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 6px; }
+    p.sub { color: #9ca3af; margin-bottom: 24px; font-size: 0.95rem; }
+    label { display: block; margin: 16px 0 6px; color: #cbd5e1; font-size: 0.9rem; font-weight: 600; }
+    input, select {
+      width: 100%; padding: 12px 14px; border-radius: 10px;
+      border: 1px solid #334155; background: #141920; color: #e5e7eb;
+      font-size: 1rem;
+    }
+    input:focus, select:focus { outline: none; border-color: #3b82f6; }
+    .row { display: flex; gap: 12px; }
+    .row > div { flex: 1; }
+    .hint { font-size: 0.8rem; color: #6b7280; margin-top: 4px; }
+    .result {
+      margin-top: 28px; padding: 16px; border-radius: 12px;
+      background: #141920; border: 1px solid #334155;
+    }
+    .result label { margin-top: 0; }
+    #url {
+      width: 100%; word-break: break-all; font-family: monospace;
+      background: #0b0f14; border: 1px solid #334155; border-radius: 8px;
+      padding: 12px; color: #22c55e; font-size: 0.9rem;
+    }
+    .btns {
+      display: flex; gap: 10px; margin-top: 14px;
+    }
+    .btn {
+      flex: 1; padding: 12px; border-radius: 10px; border: none;
+      font-size: 1rem; font-weight: 700; cursor: pointer;
+    }
+    .btn-copy { background: #3b82f6; color: #fff; }
+    .btn-open { background: #22c55e; color: #fff; }
+    .btn-qr { background: #f59e0b; color: #000; }
+    #qrcode {
+      margin-top: 16px; text-align: center; display: none;
+    }
+    #qrcode img { border-radius: 12px; }
+    .toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: #22c55e; color: #fff; padding: 12px 24px; border-radius: 24px;
+      font-weight: 700; display: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔗 磨豆機簡易連結產生器</h1>
+  <p class="sub">設定好後，把連結或 QR code 傳給使用者</p>
+
+  <label for="topic">插座 Topic</label>
+  <select id="topic">
+    <option value="gr-48be8bb6fa">磨豆機 ①（王老闆咖啡）- gr-48be8bb6fa</option>
+    <option value="gr-0023a5f531">磨豆機 ②（測試機）- gr-0023a5f531</option>
+  </select>
+
+  <div class="row">
+    <div>
+      <label for="onSec">運轉秒數（ON）</label>
+      <input id="onSec" type="number" step="0.5" min="0.5" max="10" value="4">
+      <div class="hint">建議 4~6 秒</div>
+    </div>
+    <div>
+      <label for="coolSec">冷卻秒數（OFF）</label>
+      <input id="coolSec" type="number" step="1" min="0" max="300" value="30">
+      <div class="hint">兩次磨豆之間的間隔</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div>
+      <label for="guard">看門狗秒數</label>
+      <input id="guard" type="number" step="0.5" min="2" max="20" value="8">
+      <div class="hint">緊急斷電上限，要比運轉秒數長</div>
+    </div>
+    <div>
+      <label for="port">MQTT Port</label>
+      <input id="port" type="number" value="8884">
+      <div class="hint">WebSocket 埠，通常 8884</div>
+    </div>
+  </div>
+
+  <div class="result">
+    <label>產生的連結</label>
+    <div id="url"></div>
+    <div class="btns">
+      <button class="btn btn-copy" onclick="copyUrl()">📋 複製連結</button>
+      <button class="btn btn-open" onclick="openUrl()">▶ 開啟測試</button>
+      <button class="btn btn-qr" onclick="showQR()">📱 QR Code</button>
+    </div>
+    <div id="qrcode"></div>
+  </div>
+
+  <div class="toast" id="toast">已複製！</div>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1/build/qrcode.min.js"></script>
+<script>
+const BASE = location.href.replace('/editor.html', '/index.html');
+
+function getInputs() {
+  return {
+    t: document.getElementById('topic').value,
+    on: document.getElementById('onSec').value,
+    cool: document.getElementById('coolSec').value,
+    guard: document.getElementById('guard').value,
+    port: document.getElementById('port').value,
+  };
+}
+
+function buildUrl() {
+  const c = getInputs();
+  const url = new URL(BASE);
+  url.searchParams.set('t', c.t);
+  url.searchParams.set('on', c.on);
+  url.searchParams.set('cool', c.cool);
+  url.searchParams.set('guard', c.guard);
+  url.searchParams.set('port', c.port);
+  return url.toString();
+}
+
+function update() {
+  document.getElementById('url').textContent = buildUrl();
+}
+
+function copyUrl() {
+  const text = buildUrl();
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(showToast);
+  } else {
+    const t = document.createElement('textarea');
+    t.value = text; document.body.appendChild(t);
+    t.select(); document.execCommand('copy'); document.body.removeChild(t);
+    showToast();
+  }
+}
+
+function showToast() {
+  const el = document.getElementById('toast');
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 1500);
+}
+
+function openUrl() {
+  window.open(buildUrl(), '_blank');
+}
+
+function showQR() {
+  const el = document.getElementById('qrcode');
+  el.style.display = 'block';
+  el.innerHTML = '';
+  const img = document.createElement('img');
+  QRCode.toDataURL(buildUrl(), { width: 280, margin: 2, color: { dark: '#000', light: '#fff' } }, function(err, url) {
+    if (err) { el.textContent = 'QR 產生失敗'; return; }
+    img.src = url;
+  });
+  el.appendChild(img);
+}
+
+['topic','onSec','coolSec','guard','port'].forEach(id => {
+  document.getElementById(id).addEventListener('input', update);
+});
+
+update();
+</script>
+</body>
+</html>
