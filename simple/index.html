@@ -80,42 +80,52 @@ const tStat = (sub) => 'stat/' + CFG.topic + '/' + sub;
 
 let client = null;
 let powerState = false;
-let secondsTimer = null;
+let cycleActive = false;
+let displayTimer = null;
+let autoOffTimer = null;
 let cooldownTimer = null;
 let startTs = 0;
-let coolEndTs = 0;
 let wakeLock = null;
 
 function setStatus(text, type) {
   document.getElementById('statusText').textContent = text;
   document.getElementById('dot').className = type === 'on' ? 'on' : type === 'off' ? 'off' : '';
 }
-
 function setMsg(text) { document.getElementById('msg').textContent = text; }
 
-function startTimerDisplay() {
+function clearAllTimers() {
+  if (displayTimer) clearInterval(displayTimer);
+  if (autoOffTimer) clearTimeout(autoOffTimer);
+  if (cooldownTimer) clearInterval(cooldownTimer);
+  displayTimer = null; autoOffTimer = null; cooldownTimer = null;
+}
+
+function startDisplay() {
   startTs = Date.now();
   document.getElementById('timer').textContent = CFG.onSec.toFixed(1) + 's';
-  secondsTimer = setInterval(function() {
+  displayTimer = setInterval(function() {
     const remain = Math.max(0, CFG.onSec - (Date.now() - startTs) / 1000);
     document.getElementById('timer').textContent = remain.toFixed(1) + 's';
   }, 100);
 }
-
-function stopTimerDisplay() {
-  if (secondsTimer) clearInterval(secondsTimer);
-  secondsTimer = null;
+function stopDisplay() {
+  if (displayTimer) clearInterval(displayTimer);
+  displayTimer = null;
   document.getElementById('timer').textContent = '';
 }
 
 function setOnEnabled(enabled) {
-  const btn = document.getElementById('btn-on');
-  btn.disabled = !enabled;
+  document.getElementById('btn-on').disabled = !enabled;
 }
 
 function startCooldown() {
-  coolEndTs = Date.now() + CFG.coolSec * 1000;
+  if (CFG.coolSec <= 0) {
+    setOnEnabled(true);
+    setMsg('可以再次按 ON');
+    return;
+  }
   setOnEnabled(false);
+  const coolEndTs = Date.now() + CFG.coolSec * 1000;
   document.getElementById('cooldown').textContent = '冷卻中：' + CFG.coolSec.toFixed(0) + 's';
   cooldownTimer = setInterval(function() {
     const remain = Math.max(0, coolEndTs - Date.now()) / 1000;
@@ -132,21 +142,25 @@ function startCooldown() {
 }
 
 async function acquireWakeLock() {
-  try {
-    if ('wakeLock' in navigator) {
-      wakeLock = await navigator.wakeLock.request('screen');
-    }
-  } catch (e) { console.log('wakeLock', e); }
+  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); }
+  catch (e) {}
 }
-
 async function releaseWakeLock() {
   try { if (wakeLock) { await wakeLock.release(); wakeLock = null; } }
-  catch (e) { console.log(e); }
+  catch (e) {}
 }
 
 function guardToPulseTime(sec) {
   if (!sec || sec <= 0) return 0;
   return sec <= 11.1 ? Math.max(1, Math.round(sec * 10)) : Math.round(sec) + 100;
+}
+
+function cycleEnd(reason) {
+  cycleActive = false;
+  stopDisplay();
+  releaseWakeLock();
+  setMsg(reason || '完成');
+  startCooldown();
 }
 
 function sendPower(state) {
@@ -155,19 +169,25 @@ function sendPower(state) {
     return;
   }
   client.publish(tCmnd('POWER'), state, { qos: 1 });
-  setMsg(state === 'ON' ? '運轉中...' : '已停止');
 
   if (state === 'ON') {
+    if (cycleActive) return; // ignore duplicate ON
+    cycleActive = true;
+    clearAllTimers();
+    setOnEnabled(false);
+    setMsg('運轉中...');
     acquireWakeLock();
-    startTimerDisplay();
-    // auto-OFF after onSec
-    setTimeout(function() {
-      if (powerState) sendPower('OFF');
+    startDisplay();
+    autoOffTimer = setTimeout(function() {
+      if (cycleActive) {
+        client.publish(tCmnd('POWER'), 'OFF', { qos: 1 });
+      }
     }, CFG.onSec * 1000);
   } else {
-    releaseWakeLock();
-    stopTimerDisplay();
-    startCooldown();
+    // OFF pressed or auto-off sent
+    if (!cycleActive) return;
+    clearAllTimers();
+    cycleEnd('已停止');
   }
 
   if (navigator.vibrate) navigator.vibrate(40);
@@ -198,8 +218,7 @@ function connect() {
       } else if (txt === 'OFF') {
         powerState = false;
         setStatus('已關閉', 'off');
-        releaseWakeLock();
-        stopTimerDisplay();
+        if (cycleActive) cycleEnd('完成');
       }
     }
   });
@@ -209,24 +228,20 @@ function connect() {
 }
 
 document.getElementById('btn-on').addEventListener('click', function() { sendPower('ON'); });
-document.getElementById('btn-off').addEventListener('click', function() {
-  if (secondsTimer) clearTimeout(secondsTimer); // cancel pending auto-OFF
-  secondsTimer = null;
-  sendPower('OFF');
-});
+document.getElementById('btn-off').addEventListener('click', function() { sendPower('OFF'); });
 
 // Safety: auto-OFF if tab hidden / page closed
 document.addEventListener('visibilitychange', function() {
-  if (document.hidden && powerState) {
+  if (document.hidden && cycleActive) {
     sendPower('OFF');
     setMsg('螢幕離開：已自動關閉');
   }
 });
 window.addEventListener('beforeunload', function() {
-  if (powerState) sendPower('OFF');
+  if (cycleActive) sendPower('OFF');
 });
 window.addEventListener('pagehide', function() {
-  if (powerState) sendPower('OFF');
+  if (cycleActive) sendPower('OFF');
 });
 
 connect();
