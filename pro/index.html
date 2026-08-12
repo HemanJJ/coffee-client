@@ -242,6 +242,7 @@
   </div>
 
   <!-- counter -->
+  <div class="counter" id="wakeBadge" style="color:var(--orange);min-height:1em"></div>
   <div class="counter" id="counter">本次已磨 0 次</div>
   <div style="text-align:center;margin-top:6px">
     <button id="cntReset" style="font-size:0.68rem;padding:4px 10px;border-color:var(--red);color:var(--red)">歸零</button>
@@ -269,7 +270,7 @@ const CFG = {
   user:  cfgGet('user'),
   pass:  cfgGet('pass'),
   topic: cfgGet('topic'),
-  guard: parseFloat(cfgGet('guard', '8')),   // PulseTime 看門狗秒數
+  guard: parseFloat(cfgGet('guard', '11')),   // PulseTime 看門狗秒數
 };
 function brokerUrl(){ return CFG.host ? `wss://${CFG.host}:${CFG.port||8884}/mqtt` : ''; }
 let BROKER_WS = brokerUrl();
@@ -437,6 +438,32 @@ $('#sbOff').onclick=()=>{
 };
 sbRender();
 
+// ── 防鎖屏（Wake Lock API）──
+// 手機鎖屏 → 瀏覽器凍結 JS 計時器、切斷 WebSocket → 磨豆循環會中斷。
+// 磨豆期間請求 wake lock 讓螢幕不自動關；停止時釋放，不浪費電。
+// iOS Safari 16.4+ / Android Chrome 支援；不支援的裝置會走降級提示。
+let wakeLock = null;
+async function keepAwake(on){
+  const badge = document.getElementById('wakeBadge');
+  if (!('wakeLock' in navigator)) {
+    if (badge) { badge.textContent = on ? '⚠️ 此瀏覽器不支援防鎖屏，請手動關閉自動鎖定' : ''; }
+    return;
+  }
+  try {
+    if (on && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+      if (badge) badge.textContent = '🔆 磨豆中，螢幕保持喚醒';
+    } else if (!on && wakeLock) {
+      await wakeLock.release();
+      wakeLock = null;
+      if (badge) badge.textContent = '';
+    }
+  } catch (e) {
+    if (badge) badge.textContent = '⚠️ 無法防鎖屏：' + (e.message || e.name);
+  }
+}
+
 // ── 開始 / 停止 ──
 let grinding=false, stopFlag=false, grindCount=0, grindTimer=null, safetyTimer=null,_relayState=0;
 let pendingKey=null;
@@ -464,6 +491,7 @@ $('#gStart').onclick=()=>{
   if(grinding) return;
   if(!connected) return alert('尚未連線');
   stopFlag=false; grinding=true;
+  keepAwake(true);
   $('#gStart').disabled=true; $('#gStop').disabled=false;
   $('#gProg').style.display='block';
 
@@ -506,7 +534,7 @@ $('#gStart').onclick=()=>{
     })();
   }
   function finish(){
-    clearTimers(); grinding=false;
+    clearTimers(); grinding=false; keepAwake(false);
     $('#gStart').disabled=false; $('#gStop').disabled=true;
     $('#gProg').style.display='none';
   }
@@ -514,7 +542,7 @@ $('#gStart').onclick=()=>{
 };
 
 function forceStop(){
-  stopFlag=true; clearTimers(); send(0);
+  stopFlag=true; clearTimers(); send(0); keepAwake(false);
   grinding=false; $('#gStart').disabled=false; $('#gStop').disabled=true;
   $('#gProg').style.display='none';
 }
@@ -541,6 +569,7 @@ document.addEventListener('visibilitychange', () => {
     if (client) client.end(true);
   } else {
     connect();
+    if (grinding) keepAwake(true);      // 系統會在切走時釋放 wake lock，回來要重拿
   }
 });
 
