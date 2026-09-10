@@ -254,7 +254,7 @@ function stateTopic(){ return 'device/stat/' + getMac() + '/POWER'; }
 
 function diagUpd(){
   if (!BROKER_WS) { $('#brokerLine').textContent = '沒有指定 broker —— 請用客人連結開啟'; return; }
-  let d = `${CFG.host}:${CFG.port} · ${getMac() || '(未填設備)'}`;
+  let d = (_useLocal ? '🧪 本機測試 · ' : '') + `${CFG.host}:${CFG.port} · ${getMac() || '(未填設備)'}`;
   if (devOnline === true)       d += ' · 🟢 磨豆機在線';
   else if (devOnline === false) d += ' · 🔴 磨豆機離線';
   $('#brokerLine').textContent = d;
@@ -299,6 +299,13 @@ function connect(){
     // 而且有些 Tasmota 設定會直接動繼電器 —— 絕對不要在連線時送指令。
     c.subscribe([stateTopic(), 'device/stat/' + m + '/RESULT',
                  'device/tele/' + m + '/LWT', 'device/tele/' + m + '/STATE']);
+    // Tasmota 的 LWT 是 retained，一訂閱就該收到。
+    // 4 秒內沒收到 = 這台設備根本不在這個 broker 上 —— 這正是
+    // 「畫面顯示已連線、按了卻沒反應」的真兇，要在這裡講清楚。
+    setTimeout(() => {
+      if (my !== connGen || !connected || devOnline !== null) return;
+      devOnline = false; diagUpd();
+    }, 4000);
   });
   c.on('message', (topic, msg) => {
     if (my !== connGen) return;
