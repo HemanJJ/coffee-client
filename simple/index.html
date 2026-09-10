@@ -76,8 +76,8 @@ if (!CFG.topic) {
 document.getElementById('info').textContent = '插座：' + CFG.topic + '｜運轉 ' + CFG.onSec + 's｜冷卻 ' + CFG.coolSec + 's' + (CFG.loop ? '｜循環模式' : '');
 
 const brokerUrl = () => 'wss://' + CFG.host + ':' + CFG.port + '/mqtt';
-const tCmnd = (sub) => 'cmnd/' + CFG.topic + '/' + sub;
-const tStat = (sub) => 'stat/' + CFG.topic + '/' + sub;
+const tCmnd = (sub) => 'device/cmnd/' + CFG.topic + '/' + sub;
+const tStat = (sub) => 'device/stat/' + CFG.topic + '/' + sub;
 
 let client = null;
 let powerState = false;

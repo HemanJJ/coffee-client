@@ -218,15 +218,33 @@
 <script>
 const $ = s => document.querySelector(s);
 
-// ── MQTT ──
+// ── MQTT（Tasmota + HiveMQ Cloud，每租戶一組帳密）──
 let client = null, connected = false;
-const BROKER_WS = 'wss://broker.hivemq.com:8884/mqtt';
-const _macDefault = localStorage.getItem('clientMac') || '8cce4e516285';
+
+// 連線參數：URL ?mac=&host=&port=&scheme=&user=&pass=，MAC 另存 localStorage
+//   沒帶 host 且「從 localhost 開啟」→ 自動用本機 broker（ws://<本機>:9001）
+//   有帶 host（租戶連結）→ 用該 host（HiveMQ Cloud 走 wss 8884）
+//   兩者皆無（GitHub Pages 裸開）→ 後備公開 broker broker.hivemq.com:8884
+const q = new URLSearchParams(location.search);
+const _localHost = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+                   ? location.hostname : '';
+const _hasHost = !!q.get('host');
+const _useLocal = !_hasHost && _localHost;
+const CFG = {
+  host: q.get('host') || _localHost || 'broker.hivemq.com',
+  port: q.get('port') || (_useLocal ? '9001' : '8884'),   // 本機 WebSocket = 9001，雲端 = 8884
+  scheme: q.get('scheme') || (_useLocal ? 'ws' : 'wss'),  // 本機無 TLS = ws，雲端 = wss
+  user: q.get('user') || '',
+  pass: q.get('pass') || '',
+};
+const _macDefault = q.get('mac') || localStorage.getItem('clientMac') || '';
 $('#macInput').value = _macDefault;
+const BROKER_WS = `${CFG.scheme}://${CFG.host}:${CFG.port}/mqtt`;
 
 function getMac(){ return $('#macInput').value.trim().toLowerCase().replace(/:/g, '') || _macDefault; }
-function cmdTopic(){ return 'device/status/' + getMac(); }
-function stateTopic(){ return 'device/control/' + getMac(); }
+// Tasmota 統一慣例：device/cmnd/<mac>/POWER（指令）、device/stat/<mac>/POWER（狀態）
+function cmdTopic(){ return 'device/cmnd/' + getMac() + '/POWER'; }
+function stateTopic(){ return 'device/stat/' + getMac() + '/POWER'; }
 
 function setConn(ok, txt){
   connected = ok;
@@ -236,15 +254,22 @@ function setConn(ok, txt){
 
 function connect(){
   if (client) client.end();
+  const m = getMac();
+  if (!m) { setConn(false, '⚠️ 請先填設備 MAC（12 碼）'); return; }
+  if (m.length !== 12) { setConn(false, `⚠️ MAC 只有 ${m.length} 碼（應為 12 碼）`); return; }
   setConn(false, '連線中…');
-  client = mqtt.connect(BROKER_WS, {clientId: 'c_' + getMac() + '_' + Date.now()});
+  const opts = { clientId: 'c_' + m + '_' + Date.now() };
+  if (CFG.user) { opts.username = CFG.user; opts.password = CFG.pass; }   // HiveMQ Cloud 帳密
+  client = mqtt.connect(BROKER_WS, opts);
   client.on('connect', () => {
     setConn(true, '✅ 已連線');
-    client.subscribe(stateTopic());
-    client.publish(cmdTopic(), JSON.stringify({messageId:'hello',type:'info'}));
+    client.subscribe(stateTopic());                            // device/stat/<mac>/POWER
+    client.subscribe('device/stat/' + getMac() + '/RESULT');   // 也收 RESULT（JSON）
+    client.publish(cmdTopic(), '');                            // 空 payload = 查詢 POWER 狀態
   });
   client.on('message', (topic, msg) => {
-    try { const d = JSON.parse(msg.toString()); if (typeof d.key !== 'undefined') _relayState = d.key; } catch(e) {}
+    const t = topic.toLowerCase();
+    if (t.endsWith('/power')) _relayState = (msg.toString().trim().toUpperCase() === 'ON') ? 1 : 0;
   });
   client.on('close', () => { setConn(false, '❌ 斷線 · 重連中…'); setTimeout(connect, 3000); });
   client.on('error', () => {});
@@ -347,15 +372,18 @@ $('#sbOff').onclick=()=>{
 sbRender();
 
 // ── 開始 / 停止 ──
-let grinding=false, stopFlag=false, grindCount=0, grindTimer=null, safetyTimer=null,_relayState=0;
+let grinding=false, stopFlag=false, grindCount=0, grindTimer=null, safetyTimer=null, _relayState=0;
 
 $('#counter').textContent = '本次已磨 0 次';
 
 function send(key){
   if(!client||!connected) return;
-  client.publish(cmdTopic(), JSON.stringify({type:'event',key:key,messageId:'c_'+Date.now()}));
+  client.publish(cmdTopic(), key ? 'ON' : 'OFF');   // Tasmota POWER 指令
 }
-function clearTimers(){ clearTimeout(grindTimer); clearTimeout(safetyTimer); grindTimer=null;safetyTimer=null; }
+function clearTimers(){
+  clearTimeout(grindTimer); clearTimeout(safetyTimer);
+  grindTimer=null; safetyTimer=null;
+}
 
 $('#gStart').onclick=()=>{
   if(grinding) return;
@@ -367,6 +395,8 @@ $('#gStart').onclick=()=>{
   const offSec=+$('#sOff').value, totalMin=grindMins, startedAt=Date.now();
   let cycle=0;
 
+  // 進度條 = 「當前這一圈／這階段」的進度（磨豆時條子漲、冷卻時條子漲），秒數同步倒數。
+  // （沿用改版前 pro/index.html 的 tickOn / tickOff 設計，不是全場總進度）
   function loop(){
     if(stopFlag||!connected){ send(0); finish(); return; }
     if(totalMin>0 && (Date.now()-startedAt)>=totalMin*60000){ send(0); finish(); return; }
@@ -374,37 +404,57 @@ $('#gStart').onclick=()=>{
     cycle++; grindCount++;
     $('#counter').textContent = '本次已磨 ' + grindCount + ' 次';
 
-    // 進度
-    const elapsed=(Date.now()-startedAt)/1000, total=totalMin*60;
-    const pct=totalMin?Math.min(100,(elapsed/total)*100):50;
-    $('#gBar').style.width=pct+'%'; $('#gBar').className='prog-in';
-    $('#gTxt').textContent = '🔴 第 ' + cycle + ' 圈 · 磨 ' + kv.toFixed(1) + 's';
-
-    // ON
+    // ── ON 段（紅色，條子漲，秒數倒數）──
     send(1);
     safetyTimer=setTimeout(()=>send(0),(kv+0.5)*1000);
-    grindTimer=setTimeout(()=>{
-      clearTimeout(safetyTimer);
-      send(0);
+    const onDeadline = Date.now() + kv*1000;
+    (function tickOn(){
+      if (stopFlag) return;
+      const left = Math.max(0, (onDeadline-Date.now())/1000);
+      $('#gBar').style.width = Math.min(100,(1-left/kv)*100)+'%';
       $('#gBar').className='prog-in on';
-      $('#gTxt').textContent = '🔵 冷卻 ' + offSec + 's…';
-      grindTimer=setTimeout(()=>loop(),offSec*1000);
-    },kv*1000);
+      $('#gTxt').textContent = '🔴 第 ' + cycle + ' 圈 · 磨 ' + left.toFixed(1) + 's';
+      if (left<=0){
+        clearTimeout(safetyTimer);
+        send(0);
+        // ── OFF 段（綠色，條子漲，秒數倒數）──
+        const offDeadline = Date.now() + offSec*1000;
+        (function tickOff(){
+          if (stopFlag) return;
+          const left2 = Math.max(0, (offDeadline-Date.now())/1000);
+          $('#gBar').style.width = Math.min(100,(1-left2/offSec)*100)+'%';
+          $('#gBar').className='prog-in';
+          $('#gTxt').textContent = '🔵 冷卻 ' + Math.ceil(left2) + 's…';
+          if (left2<=0){ loop(); return; }
+          grindTimer=setTimeout(tickOff,100);
+        })();
+        return;
+      }
+      grindTimer=setTimeout(tickOn,80);
+    })();
   }
   function finish(){
-    clearTimers(); grinding=false;
+    grinding=false; clearTimers();
+    send(0); setTimeout(()=>{ if(!grinding) send(0); }, 300);   // 雙重 OFF，蓋掉競態
     $('#gStart').disabled=false; $('#gStop').disabled=true;
     $('#gProg').style.display='none';
   }
   loop();
 };
 
-$('#gStop').onclick=()=>{
-  stopFlag=true; clearTimers(); send(0);
-  grinding=false;
+// 停止（也給待機到期共用）：先擋住迴圈，再連送兩次 OFF 保險
+function stopAll(){
+  stopFlag=true; grinding=false;
+  clearTimers();
+  send(0);
+  // 三重 OFF（0 / 0.3s / 1.2s）：蓋掉「ON 正在飛」或交界處競態
+  setTimeout(()=>{ if(!grinding) send(0); }, 300);
+  setTimeout(()=>{ if(!grinding) send(0); }, 1200);
   $('#gStart').disabled=false; $('#gStop').disabled=true;
   $('#gProg').style.display='none';
-};
+}
+
+$('#gStop').onclick=stopAll;
 $('#cntReset').onclick=()=>{
   if(!confirm('歸零計數器？\n\n累計 ' + grindCount + ' 次')) return;
   grindCount=0;
@@ -414,9 +464,9 @@ $('#cntReset').onclick=()=>{
 // ── 待機到期：強制停 ──
 setInterval(()=>{
   if(standbyUntil && Date.now()/1000 >= standbyUntil){
-    standbyUntil=null; stopFlag=true; clearTimers(); send(0);
-    grinding=false; $('#gStart').disabled=false; $('#gStop').disabled=true;
-    $('#gProg').style.display='none'; sbRender();
+    standbyUntil=null;
+    stopAll();          // 待機到期：擋迴圈 + 雙重 OFF
+    sbRender();
   }
 }, 1000);
 

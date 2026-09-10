@@ -280,9 +280,9 @@ $('#macInput').value = _macDefault;
 function getMac(){ return $('#macInput').value.trim() || _macDefault; }
 // Tasmota 主題（跟 GeekOpen 完全不同）
 function devTopic(){ return CFG.topic || getMac(); }
-function tCmnd(c){ return 'cmnd/' + devTopic() + '/' + c; }
-function tStat(){ return 'stat/' + devTopic() + '/#'; }
-function tTele(){ return 'tele/' + devTopic() + '/#'; }
+function tCmnd(c){ return 'device/cmnd/' + devTopic() + '/' + c; }
+function tStat(){ return 'device/stat/' + devTopic() + '/#'; }
+function tTele(){ return 'device/tele/' + devTopic() + '/#'; }
 
 function setConn(ok, txt){
   connected = ok;
