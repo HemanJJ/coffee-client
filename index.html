@@ -256,7 +256,7 @@ function diagUpd(){
   if (!BROKER_WS) { $('#brokerLine').textContent = '沒有指定 broker —— 請用客人連結開啟'; return; }
   let d = (_useLocal ? '🧪 本機測試 · ' : '') + `${CFG.host}:${CFG.port} · ${getMac() || '(未填設備)'}`;
   if (devOnline === true)       d += ' · 🟢 磨豆機在線';
-  else if (devOnline === false) d += ' · 🔴 磨豆機離線';
+  else if (devOnline === false) d += ' · 🔴 磨豆機沒回應（不在這台 broker 上？）';
   $('#brokerLine').textContent = d;
 }
 
@@ -279,6 +279,7 @@ function connect(){
   const my = ++connGen;
   if (client) { try { client.end(true); } catch (e) {} client = null; }
   devOnline = null;
+  let devLive = false;   // 這次連線有沒有真的收到設備的回應（每個世代各自算）
 
   setConn(false, '連線中…');
   const opts = {
@@ -295,22 +296,33 @@ function connect(){
   c.on('connect', () => {
     if (my !== connGen) return;
     setConn(true, '✅ 已連線');
-    // 只訂閱、不下令。連上就對 POWER 下令（連空 payload）會讓插頭每次連線都被戳一下，
-    // 而且有些 Tasmota 設定會直接動繼電器 —— 絕對不要在連線時送指令。
     c.subscribe([stateTopic(), 'device/stat/' + m + '/RESULT',
                  'device/tele/' + m + '/LWT', 'device/tele/' + m + '/STATE']);
-    // Tasmota 的 LWT 是 retained，一訂閱就該收到。
-    // 4 秒內沒收到 = 這台設備根本不在這個 broker 上 —— 這正是
-    // 「畫面顯示已連線、按了卻沒反應」的真兇，要在這裡講清楚。
+    // ── 判斷設備到底在不在 ──────────────────────────────
+    // 千萬不可以只信 `tele/<mac>/LWT`：那是 retained 訊息，等於「上次留下的便條」。
+    // 插頭被拔掉、換網路、或根本沒在這台 broker 上，那個 Online 還是會一直躺在那裡
+    // → 畫面就會出現「明明不在線卻顯示在線」。
+    // 唯一可信的證據是 **設備真的回話**。所以主動問一次 State（純查詢，不會動繼電器），
+    // 收到任何 stat/tele 回應才算在線；逾時沒回應就是不在。
+    c.publish('device/cmnd/' + m + '/State', '');
     setTimeout(() => {
-      if (my !== connGen || !connected || devOnline !== null) return;
+      if (my !== connGen || !connected || devLive) return;
       devOnline = false; diagUpd();
-    }, 4000);
+    }, 5000);
   });
   c.on('message', (topic, msg) => {
     if (my !== connGen) return;
     const t = topic.toLowerCase(), s = msg.toString().trim();
-    if (t.endsWith('/lwt')) { devOnline = (s.toLowerCase() === 'online'); diagUpd(); }
+    if (t.endsWith('/lwt')) {
+      // Offline 可以直接信；Online 不算數 —— 要等設備真的回話（見上面）
+      if (s.toLowerCase() === 'offline') { devOnline = false; devLive = false; diagUpd(); }
+      return;
+    }
+    // 設備真的有回應了
+    if (t.endsWith('/result') || t.endsWith('/state') || t.endsWith('/power')) {
+      devLive = true;
+      if (devOnline !== true) { devOnline = true; diagUpd(); }
+    }
   });
   // 只更新畫面，絕不在這裡再呼叫 connect()
   c.on('reconnect', () => { if (my === connGen) setConn(false, '🔄 重新連線中…'); });
