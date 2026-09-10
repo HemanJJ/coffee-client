@@ -225,9 +225,9 @@
   </div>
 </div>
 
-<script src="mqtt.min.js?v=5"></script>
+<script src="mqtt.min.js?v=6"></script>
 <script>
-const V = 'v5';      // 版本字串：只在 ?diag=1 時顯示，用來判斷瀏覽器是不是還吃著舊快取
+const V = 'v6';      // 版本字串：只在 ?diag=1 時顯示，用來判斷瀏覽器是不是還吃著舊快取
 const $ = s => document.querySelector(s);
 
 // ── MQTT（Tasmota + HiveMQ Cloud，每租戶一組帳密）──
@@ -331,19 +331,24 @@ function connect(){
   c.on('connect', () => {
     if (my !== connGen) return;
     setConn(true, '✅ 已連線');
-    c.subscribe([stateTopic(), 'device/stat/' + m + '/RESULT',
-                 'device/tele/' + m + '/LWT', 'device/tele/' + m + '/STATE']);
     // ── 判斷設備到底在不在 ──────────────────────────────
     // 千萬不可以只信 `tele/<mac>/LWT`：那是 retained 訊息，等於「上次留下的便條」。
     // 插頭被拔掉、換網路、或根本沒在這台 broker 上，那個 Online 還是會一直躺在那裡
     // → 畫面就會出現「明明不在線卻顯示在線」。
     // 唯一可信的證據是 **設備真的回話**。所以主動問一次 State（純查詢，不會動繼電器），
     // 收到任何 stat/tele 回應才算在線；逾時沒回應就是不在。
-    c.publish('device/cmnd/' + m + '/State', '');
+    // ⚠️ 探測一定要等 subscribe 的回呼才送：訂閱是非同步的，
+    //    先送再訂會漏掉設備的回應 → 明明在線卻被判成「沒回應」。
+    c.subscribe([stateTopic(), 'device/stat/' + m + '/RESULT',
+                 'device/tele/' + m + '/LWT', 'device/tele/' + m + '/STATE'],
+      (err) => {
+        if (my !== connGen || err) return;
+        c.publish('device/cmnd/' + m + '/State', '');
+      });
     setTimeout(() => {
       if (my !== connGen || !connected || devLive) return;
       devOnline = false; diagUpd();
-    }, 5000);
+    }, 6000);
   });
   c.on('message', (topic, msg) => {
     if (my !== connGen) return;
