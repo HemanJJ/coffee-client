@@ -219,12 +219,14 @@
   </div>
 </div>
 
-<script src="mqtt.min.js"></script>
+<script src="mqtt.min.js?v=3"></script>
 <script>
+const V = 'v3';      // 版本字串：顯示在診斷列，用來判斷瀏覽器是不是還吃著舊快取
 const $ = s => document.querySelector(s);
 
 // ── MQTT（Tasmota + HiveMQ Cloud，每租戶一組帳密）──
 let client = null, connected = false, connGen = 0, devOnline = null;
+let activeMac = '';  // 「目前這條連線」綁定的 MAC（理由見 diagUpd 的說明）
 
 // 連線參數：URL ?mac=&host=&port=&scheme=&user=&pass=，MAC 另存 localStorage
 //   有帶 host（客人連結）→ 用該 host（HiveMQ Cloud 走 wss 8884）
@@ -249,14 +251,21 @@ const BROKER_WS = CFG.host ? `${CFG.scheme}://${CFG.host}:${CFG.port}/mqtt` : ''
 
 function getMac(){ return $('#macInput').value.trim().toLowerCase().replace(/:/g, '') || _macDefault; }
 // Tasmota 統一慣例：device/cmnd/<mac>/POWER（指令）、device/stat/<mac>/POWER（狀態）
-function cmdTopic(){ return 'device/cmnd/' + getMac() + '/POWER'; }
-function stateTopic(){ return 'device/stat/' + getMac() + '/POWER'; }
+// ⚠️ 一律用 activeMac —— 也就是「這條連線實際訂閱的對象」，不是輸入框的即時值。
+//    兩者一旦不一致，畫面就會「標籤寫 A、狀態其實是 B」，
+//    於是出現「明明不在線卻顯示在線」這種鬼故事。
+function cmdTopic(){ return 'device/cmnd/' + (activeMac || getMac()) + '/POWER'; }
+function stateTopic(){ return 'device/stat/' + (activeMac || getMac()) + '/POWER'; }
 
 function diagUpd(){
   if (!BROKER_WS) { $('#brokerLine').textContent = '沒有指定 broker —— 請用客人連結開啟'; return; }
-  let d = (_useLocal ? '🧪 本機測試 · ' : '') + `${CFG.host}:${CFG.port} · ${getMac() || '(未填設備)'}`;
+  const shown = activeMac || getMac();
+  let d = (_useLocal ? '🧪 本機測試 · ' : '') + `${CFG.host}:${CFG.port} · ${shown || '(未填設備)'}`;
   if (devOnline === true)       d += ' · 🟢 磨豆機在線';
   else if (devOnline === false) d += ' · 🔴 磨豆機沒回應（不在這台 broker 上？）';
+  // 輸入框被改過但還沒重新連線：講清楚，別讓人以為上面那行是在講新的那台
+  if (activeMac && getMac() && getMac() !== activeMac) d += `　⚠️ 已改成 ${getMac()}，尚未連線`;
+  d += `　${V}`;
   $('#brokerLine').textContent = d;
 }
 
@@ -279,6 +288,7 @@ function connect(){
   const my = ++connGen;
   if (client) { try { client.end(true); } catch (e) {} client = null; }
   devOnline = null;
+  activeMac = m;         // 這條連線綁定的設備 —— 診斷列與指令都用它
   let devLive = false;   // 這次連線有沒有真的收到設備的回應（每個世代各自算）
 
   setConn(false, '連線中…');
