@@ -154,7 +154,7 @@
   <div class="conn" id="conn">
     <span class="dot"></span><span id="connTxt">連線中…</span>
   </div>
-  <div class="diag" id="brokerLine">—</div>
+  <div class="diag" id="brokerLine" style="display:none"></div>
 
   <!-- standby timer -->
   <div class="sb" id="sbPanel">
@@ -225,9 +225,9 @@
   </div>
 </div>
 
-<script src="mqtt.min.js?v=4"></script>
+<script src="mqtt.min.js?v=5"></script>
 <script>
-const V = 'v4';      // 版本字串：顯示在診斷列，用來判斷瀏覽器是不是還吃著舊快取
+const V = 'v5';      // 版本字串：只在 ?diag=1 時顯示，用來判斷瀏覽器是不是還吃著舊快取
 const $ = s => document.querySelector(s);
 
 // ── MQTT（Tasmota + HiveMQ Cloud，每租戶一組帳密）──
@@ -254,6 +254,9 @@ const CFG = {
 const _macDefault = q.get('mac') || localStorage.getItem('clientMac') || '';
 $('#macInput').value = _macDefault;
 const BROKER_WS = CFG.host ? `${CFG.scheme}://${CFG.host}:${CFG.port}/mqtt` : '';
+// ?diag=1 → 診斷列顯示完整技術資訊（broker 網址 / MAC / 版本）。
+// 客人端預設不顯示，只有真的出問題才跳一行白話警告。
+const DIAG = q.get('diag') === '1';
 
 function getMac(){ return $('#macInput').value.trim().toLowerCase().replace(/:/g, '') || _macDefault; }
 // Tasmota 統一慣例：device/cmnd/<mac>/POWER（指令）、device/stat/<mac>/POWER（狀態）
@@ -264,7 +267,23 @@ function cmdTopic(){ return 'device/cmnd/' + (activeMac || getMac()) + '/POWER';
 function stateTopic(){ return 'device/stat/' + (activeMac || getMac()) + '/POWER'; }
 
 function diagUpd(){
-  if (!BROKER_WS) { $('#brokerLine').textContent = '沒有指定 broker —— 請用客人連結開啟'; return; }
+  const el = $('#brokerLine');
+
+  // 客人端預設「完全不顯示」這行 —— broker 網址、MAC、版本號是給工程師看的，
+  // 客人看到只會覺得是壞掉。要看完整技術資訊：網址後面加 ?diag=1
+  if (!DIAG) {
+    let msg = '';
+    if (!BROKER_WS)                        msg = '⚠️ 這個網址不完整，請用完整的客人連結';
+    else if (devOnline === false)          msg = '⚠️ 磨豆機沒回應，請確認插頭電源與網路';
+    else if (activeMac && getMac() && getMac() !== activeMac)
+                                           msg = `⚠️ 已改成 ${getMac()}，尚未連線`;
+    el.textContent = msg;
+    el.style.display = msg ? 'block' : 'none';
+    return;
+  }
+
+  el.style.display = 'block';
+  if (!BROKER_WS) { el.textContent = '沒有指定 broker —— 請用客人連結開啟'; return; }
   const shown = activeMac || getMac();
   let d = (_useLocal ? '🧪 本機測試 · ' : '') + `${CFG.host}:${CFG.port} · ${shown || '(未填設備)'}`;
   if (devOnline === true)       d += ' · 🟢 磨豆機在線';
@@ -272,7 +291,7 @@ function diagUpd(){
   // 輸入框被改過但還沒重新連線：講清楚，別讓人以為上面那行是在講新的那台
   if (activeMac && getMac() && getMac() !== activeMac) d += `　⚠️ 已改成 ${getMac()}，尚未連線`;
   d += `　${V}`;
-  $('#brokerLine').textContent = d;
+  el.textContent = d;
 }
 
 function setConn(ok, txt){
