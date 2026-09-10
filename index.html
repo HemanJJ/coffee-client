@@ -225,14 +225,14 @@
   </div>
 </div>
 
-<script src="mqtt.min.js?v=6"></script>
+<script src="mqtt.min.js?v=7"></script>
 <script>
-const V = 'v6';      // 版本字串：只在 ?diag=1 時顯示，用來判斷瀏覽器是不是還吃著舊快取
+const V = 'v7';      // 版本字串：只在 ?diag=1 時顯示，用來判斷瀏覽器是不是還吃著舊快取
 const $ = s => document.querySelector(s);
 
 // ── MQTT（Tasmota + HiveMQ Cloud，每租戶一組帳密）──
 let client = null, connected = false, connGen = 0, devOnline = null;
-let activeMac = '';  // 「目前這條連線」綁定的 MAC（理由見 diagUpd 的說明）
+let activeMac = '';  // 「目前這條連線」綁定的 MAC（理由見 renderStatus 的說明）
 
 // 連線參數：URL ?mac=&host=&port=&scheme=&user=&pass=，MAC 另存 localStorage
 //   有帶 host（客人連結）→ 用該 host（HiveMQ Cloud 走 wss 8884）
@@ -266,57 +266,64 @@ function getMac(){ return $('#macInput').value.trim().toLowerCase().replace(/:/g
 function cmdTopic(){ return 'device/cmnd/' + (activeMac || getMac()) + '/POWER'; }
 function stateTopic(){ return 'device/stat/' + (activeMac || getMac()) + '/POWER'; }
 
-function diagUpd(){
-  const el = $('#brokerLine');
+// ── 狀態顯示 ──────────────────────────────────────────────
+// ⚠️ 這裡以前只反映「瀏覽器有沒有連上 broker」，所以磨豆機明明不在線，
+//    畫面照樣掛著「✅ 已連線」—— 客人一看就以為機器在線。
+//    **broker 連上 ≠ 磨豆機在線**。現在唯一的指示燈一律只講「設備」。
+let brokerUp = false, lastErr = '';
 
-  // 客人端預設「完全不顯示」這行 —— broker 網址、MAC、版本號是給工程師看的，
-  // 客人看到只會覺得是壞掉。要看完整技術資訊：網址後面加 ?diag=1
-  if (!DIAG) {
-    let msg = '';
-    if (!BROKER_WS)                        msg = '⚠️ 這個網址不完整，請用完整的客人連結';
-    else if (devOnline === false)          msg = '⚠️ 磨豆機沒回應，請確認插頭電源與網路';
-    else if (activeMac && getMac() && getMac() !== activeMac)
-                                           msg = `⚠️ 已改成 ${getMac()}，尚未連線`;
-    el.textContent = msg;
-    el.style.display = msg ? 'block' : 'none';
-    return;
-  }
-
-  el.style.display = 'block';
-  if (!BROKER_WS) { el.textContent = '沒有指定 broker —— 請用客人連結開啟'; return; }
-  const shown = activeMac || getMac();
-  let d = (_useLocal ? '🧪 本機測試 · ' : '') + `${CFG.host}:${CFG.port} · ${shown || '(未填設備)'}`;
-  if (devOnline === true)       d += ' · 🟢 磨豆機在線';
-  else if (devOnline === false) d += ' · 🔴 磨豆機沒回應（不在這台 broker 上？）';
-  // 輸入框被改過但還沒重新連線：講清楚，別讓人以為上面那行是在講新的那台
-  if (activeMac && getMac() && getMac() !== activeMac) d += `　⚠️ 已改成 ${getMac()}，尚未連線`;
-  d += `　${V}`;
-  el.textContent = d;
-}
-
-function setConn(ok, txt){
-  connected = ok;
-  $('#conn').className = 'conn ' + (ok ? 'ok' : 'bad');
+function renderStatus(){
+  const mac = getMac();
+  let txt, ok = false;
+  if (typeof mqtt === 'undefined') txt = '❌ MQTT 程式庫沒載入';
+  else if (!BROKER_WS)             txt = '⚠️ 網址不完整，請用完整的客人連結';
+  else if (!mac)                   txt = '⚠️ 請先填設備 MAC（12 碼）';
+  else if (mac.length !== 12)      txt = `⚠️ MAC 只有 ${mac.length} 碼（應為 12 碼）`;
+  else if (!brokerUp)              txt = '❌ 沒連上伺服器 · 重試中…';
+  else if (devOnline === null)     txt = '🔄 確認磨豆機中…';
+  else if (devOnline === true)   { txt = '✅ 磨豆機在線'; ok = true; }
+  else                             txt = '❌ 磨豆機沒回應';
   $('#connTxt').textContent = txt;
-  diagUpd();
+  $('#conn').className = 'conn ' + (ok ? 'ok' : 'bad');
+  // 只有「設備確定回話」才算真的可以操作
+  connected = brokerUp && devOnline === true;
+
+  // 第二行：正常時完全不顯示（不給客人看技術字）；只有需要動作才給白話提示
+  const el = $('#brokerLine');
+  let msg = '';
+  if (DIAG) {
+    const shown = activeMac || mac || '(未填設備)';
+    msg = (_useLocal ? '🧪 本機測試 · ' : '')
+        + (BROKER_WS ? `${CFG.host}:${CFG.port} · ${shown}` : '沒有 broker')
+        + ` · broker=${brokerUp ? 'up' : 'down'}`
+        + ` · 設備=${devOnline === null ? '檢查中' : (devOnline ? '在線' : '沒回應')}`
+        + (lastErr ? ` · err=${lastErr}` : '')
+        + `　${V}`;
+  } else if (devOnline === false) {
+    msg = '⚠️ 磨豆機沒回應 —— 請確認插頭有電、Wi-Fi 正常';
+  } else if (activeMac && mac && mac !== activeMac) {
+    msg = `⚠️ 已改成 ${mac}，尚未連線`;
+  }
+  el.textContent = msg;
+  el.style.display = msg ? 'block' : 'none';
 }
 
 function connect(){
   const m = getMac();
-  if (!m) { setConn(false, '⚠️ 請先填設備 MAC（12 碼）'); return; }
-  if (m.length !== 12) { setConn(false, `⚠️ MAC 只有 ${m.length} 碼（應為 12 碼）`); return; }
-  if (typeof mqtt === 'undefined') { devOnline = null; setConn(false, '❌ MQTT 程式庫沒載入'); return; }
-  if (!BROKER_WS) { devOnline = null; setConn(false, '❌ 這個網址沒帶 broker'); return; }
 
   // 世代編號：舊連線的事件不准再動到新連線。
   // （舊版是舊 client 的 close 去 client.end() 掉新 client → 自己咬自己，永遠連不上）
   const my = ++connGen;
   if (client) { try { client.end(true); } catch (e) {} client = null; }
-  devOnline = null;
-  activeMac = m;         // 這條連線綁定的設備 —— 診斷列與指令都用它
+  brokerUp = false; devOnline = null; activeMac = ''; lastErr = '';
+
+  // 參數不合法就別連，但畫面要正確反映原因
+  if (!m || m.length !== 12 || typeof mqtt === 'undefined' || !BROKER_WS) { renderStatus(); return; }
+
+  activeMac = m;         // 這條連線綁定的設備 —— 顯示與指令都用它
   let devLive = false;   // 這次連線有沒有真的收到設備的回應（每個世代各自算）
 
-  setConn(false, '連線中…');
+  renderStatus();
   const opts = {
     clientId: 'c_' + m + '_' + Math.random().toString(16).slice(2, 10),
     reconnectPeriod: 3000,   // 重連交給 mqtt.js 自己處理，不再手動 recursive connect
@@ -330,7 +337,8 @@ function connect(){
 
   c.on('connect', () => {
     if (my !== connGen) return;
-    setConn(true, '✅ 已連線');
+    brokerUp = true;
+    renderStatus();   // 這時只知道 broker 通了，設備還在確認 → 顯示「🔄 確認磨豆機中…」
     // ── 判斷設備到底在不在 ──────────────────────────────
     // 千萬不可以只信 `tele/<mac>/LWT`：那是 retained 訊息，等於「上次留下的便條」。
     // 插頭被拔掉、換網路、或根本沒在這台 broker 上，那個 Online 還是會一直躺在那裡
@@ -346,8 +354,8 @@ function connect(){
         c.publish('device/cmnd/' + m + '/State', '');
       });
     setTimeout(() => {
-      if (my !== connGen || !connected || devLive) return;
-      devOnline = false; diagUpd();
+      if (my !== connGen || !brokerUp || devLive) return;
+      devOnline = false; renderStatus();
     }, 6000);
   });
   c.on('message', (topic, msg) => {
@@ -355,23 +363,24 @@ function connect(){
     const t = topic.toLowerCase(), s = msg.toString().trim();
     if (t.endsWith('/lwt')) {
       // Offline 可以直接信；Online 不算數 —— 要等設備真的回話（見上面）
-      if (s.toLowerCase() === 'offline') { devOnline = false; devLive = false; diagUpd(); }
+      if (s.toLowerCase() === 'offline') { devOnline = false; devLive = false; renderStatus(); }
       return;
     }
     // 設備真的有回應了
     if (t.endsWith('/result') || t.endsWith('/state') || t.endsWith('/power')) {
       devLive = true;
-      if (devOnline !== true) { devOnline = true; diagUpd(); }
+      if (devOnline !== true) { devOnline = true; renderStatus(); }
     }
   });
   // 只更新畫面，絕不在這裡再呼叫 connect()
-  c.on('reconnect', () => { if (my === connGen) setConn(false, '🔄 重新連線中…'); });
-  c.on('offline',   () => { if (my === connGen) setConn(false, '❌ 離線 · 自動重連中…'); });
-  c.on('close',     () => { if (my === connGen) setConn(false, '❌ 斷線 · 自動重連中…'); });
+  c.on('reconnect', () => { if (my === connGen) { brokerUp = false; renderStatus(); } });
+  c.on('offline',   () => { if (my === connGen) { brokerUp = false; renderStatus(); } });
+  c.on('close',     () => { if (my === connGen) { brokerUp = false; renderStatus(); } });
   c.on('error', (e) => {
     if (my !== connGen) return;
-    devOnline = null;
-    setConn(false, '❌ ' + ((e && e.message) ? e.message : '連線失敗'));
+    brokerUp = false; devOnline = null;
+    lastErr = (e && e.message) ? String(e.message).slice(0, 60) : '連線失敗';
+    renderStatus();
   });
 }
 connect();
@@ -477,7 +486,10 @@ let grinding=false, stopFlag=false, grindCount=0, grindTimer=null, safetyTimer=n
 $('#counter').textContent = '本次已磨 0 次';
 
 function send(key){
-  if(!client||!connected) return;
+  // ⚠️ 這裡只要求「broker 連著」，不看設備在不在：
+  //    OFF（停機）指令絕對不能被狀態判斷擋掉，那會變成人命問題。
+  //    設備真的失聯時，插頭自己的 PulseTime 看門狗會在 11 秒後斷電。
+  if(!client||!brokerUp) return;
   client.publish(cmdTopic(), key ? 'ON' : 'OFF');   // Tasmota POWER 指令
 }
 function clearTimers(){
@@ -487,7 +499,9 @@ function clearTimers(){
 
 $('#gStart').onclick=()=>{
   if(grinding) return;
-  if(!connected) return alert('尚未連線');
+  if(!connected) return alert(devOnline === false
+    ? '磨豆機沒回應 —— 請確認插頭有電、Wi-Fi 正常'
+    : '還沒連上，請稍候');
   stopFlag=false; grinding=true;
   $('#gStart').disabled=true; $('#gStop').disabled=false;
   $('#gProg').style.display='block';
@@ -498,7 +512,7 @@ $('#gStart').onclick=()=>{
   // 進度條 = 「當前這一圈／這階段」的進度（磨豆時條子漲、冷卻時條子漲），秒數同步倒數。
   // （沿用改版前 pro/index.html 的 tickOn / tickOff 設計，不是全場總進度）
   function loop(){
-    if(stopFlag||!connected){ send(0); finish(); return; }
+    if(stopFlag||!brokerUp){ send(0); finish(); return; }
     if(totalMin>0 && (Date.now()-startedAt)>=totalMin*60000){ send(0); finish(); return; }
 
     cycle++; grindCount++;
