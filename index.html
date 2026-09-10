@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>智能磨豆機</title>
 <style>
   :root {
@@ -13,36 +13,37 @@
   * { box-sizing:border-box; margin:0; padding:0; }
   body { font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
     background:var(--bg); color:var(--text); min-height:100dvh;
-    display:flex; flex-direction:column; align-items:center; padding:16px; }
+    -webkit-text-size-adjust:100%;
+    display:flex; flex-direction:column; align-items:center; padding:14px; }
   .card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
-    padding:20px; width:100%; max-width:400px; }
-  h1 { font-size:1.2rem; text-align:center; margin-bottom:2px; }
-  .sub { text-align:center; font-size:0.7rem; color:var(--muted); margin-bottom:14px; }
+    padding:18px; width:100%; max-width:460px; }
+  h1 { font-size:1.45rem; text-align:center; margin-bottom:3px; }
+  .sub { text-align:center; font-size:0.9rem; color:var(--muted); margin-bottom:14px; }
 
   /* ── standby ── */
   .sb { display:flex; align-items:center; gap:10px; margin-bottom:14px; padding:12px;
     background:rgba(59,130,246,0.05); border-radius:8px; border:1px solid var(--border); }
   .sb.low { background:rgba(239,68,68,0.06); border-color:rgba(239,68,68,0.2); }
-  .sb-ico { font-size:1.4rem; }
+  .sb-ico { font-size:1.6rem; }
   .sb-info { flex:1; min-width:0; }
-  .sb-ttl { font-size:1.1rem; font-weight:800; font-variant-numeric:tabular-nums; }
-  .sb-sub { font-size:0.68rem; color:var(--muted); margin-top:1px; }
+  .sb-ttl { font-size:1.35rem; font-weight:800; font-variant-numeric:tabular-nums; }
+  .sb-sub { font-size:0.85rem; color:var(--muted); margin-top:2px; line-height:1.35; }
   .sb-r { display:flex; gap:6px; }
-  .sb-r button { padding:8px 12px; font-size:0.75rem; }
+  .sb-r button { padding:10px 14px; font-size:0.9rem; }
 
   /* ── 連線指示 ── */
-  .conn { text-align:center; font-size:0.7rem; margin-bottom:12px; }
-  .conn .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+  .conn { text-align:center; font-size:0.9rem; margin-bottom:10px; }
+  .conn .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; vertical-align:middle; }
   .conn.ok .dot { background:var(--green); }
   .conn.bad .dot { background:var(--red); }
 
   /* ── 診斷列（broker / 設備）── */
-  .diag { text-align:center; font-size:0.6rem; color:var(--muted); margin:-8px 0 12px;
-    word-break:break-all; font-family:ui-monospace,SFMono-Regular,monospace; line-height:1.5; }
+  .diag { text-align:center; font-size:0.78rem; color:var(--muted); margin:-6px 0 12px;
+    word-break:break-all; font-family:ui-monospace,SFMono-Regular,monospace; line-height:1.6; }
 
   /* ── 旋鈕 ── */
   .knob-wrap { position:relative; display:flex; justify-content:center; margin:6px 0; }
-  .knob { width:100%; max-width:240px; cursor:grab; touch-action:none; user-select:none; }
+  .knob { width:100%; max-width:250px; cursor:grab; touch-action:none; user-select:none; }
   .knob:active { cursor:grabbing; }
   .k-track { fill:none; stroke:#1a2130; stroke-width:14; stroke-linecap:round;
     stroke-dasharray:452.39 603.19; transform:rotate(135deg); transform-origin:120px 120px; }
@@ -54,13 +55,13 @@
   .k-hub { fill:var(--panel); stroke:var(--border); stroke-width:1; }
   .knob-read { position:absolute; top:50%; left:50%; transform:translate(-50%,-46%);
     text-align:center; pointer-events:none; }
-  .kr-val { font-size:2.4rem; font-weight:800; line-height:1; font-variant-numeric:tabular-nums; }
-  .kr-unit { font-size:0.7rem; color:var(--muted); margin-top:2px; }
+  .kr-val { font-size:2.9rem; font-weight:800; line-height:1; font-variant-numeric:tabular-nums; }
+  .kr-unit { font-size:0.9rem; color:var(--muted); margin-top:3px; }
 
   /* ── buttons ── */
-  .row { display:flex; justify-content:center; gap:8px; margin:8px 0; }
+  .row { display:flex; justify-content:center; gap:8px; margin:10px 0; }
   button { border:1px solid var(--border); background:var(--panel); color:var(--text);
-    border-radius:7px; padding:9px 16px; font-size:0.82rem; cursor:pointer;
+    border-radius:8px; padding:12px 18px; font-size:1rem; cursor:pointer;
     transition:all 0.15s; font-family:inherit;
     box-shadow:0 2px 0 rgba(0,0,0,0.3), 0 4px 8px rgba(0,0,0,0.2); }
   button:hover { border-color:var(--accent); transform:translateY(-1px);
@@ -68,13 +69,13 @@
   button:active { transform:translateY(2px) scale(0.97);
     box-shadow:0 0px 0 rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.15); }
   button.go { background:var(--green); color:#06240f; border-color:var(--green);
-    font-size:0.95rem; padding:12px; font-weight:700;
+    font-size:1.2rem; padding:16px; font-weight:700;
     box-shadow:0 3px 0 #0d8a5e, 0 6px 16px rgba(16,185,129,0.3); }
   button.go:hover { border-color:#0d8a5e; box-shadow:0 4px 0 #0d8a5e, 0 8px 20px rgba(16,185,129,0.4); }
   button.go:active { transform:translateY(3px);
     box-shadow:0 0px 0 #0d8a5e, 0 2px 6px rgba(16,185,129,0.2); }
   button.stop { background:var(--red); color:#fff; border-color:var(--red);
-    font-size:0.9rem; padding:12px; font-weight:700;
+    font-size:1.15rem; padding:16px; font-weight:700;
     box-shadow:0 3px 0 #b91c1c, 0 6px 16px rgba(239,68,68,0.3); }
   button.stop:hover { border-color:#f87171; box-shadow:0 4px 0 #b91c1c, 0 8px 24px rgba(239,68,68,0.5); }
   button.stop:active { transform:translateY(3px);
@@ -93,44 +94,49 @@
     50% { box-shadow:0 3px 0 #b91c1c, 0 8px 28px rgba(239,68,68,0.6); }
   }
 
-  .dur-row { display:flex; gap:5px; margin-top:8px; flex-wrap:wrap; }
-  button.dur { flex:1; min-width:52px; padding:7px 4px; font-size:0.75rem; }
+  .dur-row { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+  button.dur { flex:1; min-width:58px; padding:11px 4px; font-size:0.95rem; }
   button.dur.active { background:var(--accent); color:#fff; border-color:var(--accent); }
 
   /* ── sliders ── */
-  .set-label { font-size:0.72rem; color:var(--muted); margin-bottom:3px; display:block; }
-  .set-row { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
-  .set-row input[type=range] { flex:1; -webkit-appearance:none; height:5px;
+  .set-label { font-size:0.92rem; color:var(--muted); margin-bottom:5px; display:block;
+    line-height:1.4; }
+  .set-row { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .set-row input[type=range] { flex:1; -webkit-appearance:none; height:6px;
     background:#1a2130; border-radius:3px; }
-  .set-row input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:16px;
-    height:16px; border-radius:50%; background:var(--accent); cursor:pointer; }
-  .set-val { font-size:0.82rem; font-weight:700; min-width:32px; text-align:right;
+  .set-row input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:22px;
+    height:22px; border-radius:50%; background:var(--accent); cursor:pointer; }
+  .set-val { font-size:1rem; font-weight:700; min-width:40px; text-align:right;
     font-variant-numeric:tabular-nums; }
 
-  .est { margin-top:10px; padding:8px; background:rgba(59,130,246,0.06); border-radius:6px;
-    font-size:0.72rem; color:var(--muted); text-align:center; }
+  .est { margin-top:10px; padding:10px; background:rgba(59,130,246,0.06); border-radius:6px;
+    font-size:0.92rem; color:var(--muted); text-align:center; line-height:1.5; }
 
   /* ── progress ── */
   .prog { margin-top:10px; display:none; }
-  .prog-bar { height:6px; background:#1a2130; border-radius:3px; overflow:hidden; }
+  .prog-bar { height:8px; background:#1a2130; border-radius:4px; overflow:hidden; }
   .prog-in { height:100%; width:0%; background:var(--green); transition:width 0.15s linear; }
   .prog-in.on { background:var(--red); }
-  .prog-txt { text-align:center; font-size:0.72rem; color:var(--muted); margin-top:5px;
+  .prog-txt { text-align:center; font-size:0.95rem; color:var(--muted); margin-top:6px;
     font-variant-numeric:tabular-nums; }
 
   /* ── counter ── */
-  .counter { text-align:center; font-size:0.72rem; color:var(--muted); margin-top:10px; }
+  .counter { text-align:center; font-size:0.95rem; color:var(--muted); margin-top:12px; }
 
   /* ── mac ── */
-  .mac-row { display:flex; align-items:center; gap:6px; margin-bottom:10px; }
-  .mac-row label { font-size:0.72rem; color:var(--muted); white-space:nowrap; }
-  .mac-row input { flex:1; padding:6px 8px; background:#0d1219; border:1px solid var(--border);
-    border-radius:5px; color:var(--text); font-size:0.75rem; font-family:monospace; text-align:center; }
+  .mac-row { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .mac-row label { font-size:0.92rem; color:var(--muted); white-space:nowrap; }
+  /* 輸入框一定要 >=16px，否則 iOS Safari 會在聚焦時自動放大整頁 */
+  .mac-row input { flex:1; padding:11px 10px; background:#0d1219; border:1px solid var(--border);
+    border-radius:6px; color:var(--text); font-size:1.05rem; font-family:monospace; text-align:center; }
 
   @media (max-width:400px) {
+    body { padding:10px; }
     .card { padding:14px; }
-    .knob { max-width:200px; }
-    .kr-val { font-size:2rem; }
+    .knob { max-width:215px; }
+    .kr-val { font-size:2.6rem; }
+    button { padding:12px 14px; }
+    button.dur { min-width:52px; font-size:0.9rem; }
   }
 </style>
 </head>
@@ -159,7 +165,7 @@
     </div>
     <div class="sb-r">
       <button id="sbAdd">＋1 小時</button>
-      <button id="sbOff" disabled class="stop" style="font-size:0.75rem;padding:8px 12px">下班</button>
+      <button id="sbOff" disabled class="stop" style="font-size:0.9rem;padding:10px 14px">下班</button>
     </div>
   </div>
 
@@ -203,7 +209,7 @@
   <!-- start / stop -->
   <div class="row" style="margin-top:12px">
     <button class="go" id="gStart" style="flex:1">▶ 開始磨</button>
-    <button class="stop" id="gStop" disabled style="flex:0 0 90px">■ 停</button>
+    <button class="stop" id="gStop" disabled style="flex:0 0 112px">■ 停</button>
   </div>
 
   <!-- progress -->
@@ -215,13 +221,13 @@
   <!-- counter -->
   <div class="counter" id="counter">本次已磨 0 次</div>
   <div style="text-align:center;margin-top:6px">
-    <button id="cntReset" style="font-size:0.68rem;padding:4px 10px;border-color:var(--red);color:var(--red)">歸零</button>
+    <button id="cntReset" style="font-size:0.85rem;padding:9px 18px;border-color:var(--red);color:var(--red)">歸零</button>
   </div>
 </div>
 
-<script src="mqtt.min.js?v=3"></script>
+<script src="mqtt.min.js?v=4"></script>
 <script>
-const V = 'v3';      // 版本字串：顯示在診斷列，用來判斷瀏覽器是不是還吃著舊快取
+const V = 'v4';      // 版本字串：顯示在診斷列，用來判斷瀏覽器是不是還吃著舊快取
 const $ = s => document.querySelector(s);
 
 // ── MQTT（Tasmota + HiveMQ Cloud，每租戶一組帳密）──
