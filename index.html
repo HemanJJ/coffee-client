@@ -36,6 +36,10 @@
   .conn.ok .dot { background:var(--green); }
   .conn.bad .dot { background:var(--red); }
 
+  /* ── 診斷列（broker / 設備）── */
+  .diag { text-align:center; font-size:0.6rem; color:var(--muted); margin:-8px 0 12px;
+    word-break:break-all; font-family:ui-monospace,SFMono-Regular,monospace; line-height:1.5; }
+
   /* ── 旋鈕 ── */
   .knob-wrap { position:relative; display:flex; justify-content:center; margin:6px 0; }
   .knob { width:100%; max-width:240px; cursor:grab; touch-action:none; user-select:none; }
@@ -144,6 +148,7 @@
   <div class="conn" id="conn">
     <span class="dot"></span><span id="connTxt">連線中…</span>
   </div>
+  <div class="diag" id="brokerLine">—</div>
 
   <!-- standby timer -->
   <div class="sb" id="sbPanel">
@@ -214,24 +219,25 @@
   </div>
 </div>
 
-<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<script src="mqtt.min.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 
 // ── MQTT（Tasmota + HiveMQ Cloud，每租戶一組帳密）──
-let client = null, connected = false;
+let client = null, connected = false, connGen = 0, devOnline = null;
 
 // 連線參數：URL ?mac=&host=&port=&scheme=&user=&pass=，MAC 另存 localStorage
-//   沒帶 host 且「從 localhost 開啟」→ 自動用本機 broker（ws://<本機>:9001）
-//   有帶 host（租戶連結）→ 用該 host（HiveMQ Cloud 走 wss 8884）
-//   兩者皆無（GitHub Pages 裸開）→ 後備公開 broker broker.hivemq.com:8884
+//   有帶 host（客人連結）→ 用該 host（HiveMQ Cloud 走 wss 8884）
+//   沒帶 host 且從 localhost 開啟 → 本機 broker（ws://<本機>:9001，測試用）
+//   兩者皆無 → 直接報錯，不猜。以前會偷偷退回公開 broker，
+//             結果畫面顯示「已連線」卻永遠控不到，這是最難查的假象。
 const q = new URLSearchParams(location.search);
 const _localHost = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
                    ? location.hostname : '';
 const _hasHost = !!q.get('host');
 const _useLocal = !_hasHost && _localHost;
 const CFG = {
-  host: q.get('host') || _localHost || 'broker.hivemq.com',
+  host: q.get('host') || _localHost || '',
   port: q.get('port') || (_useLocal ? '9001' : '8884'),   // 本機 WebSocket = 9001，雲端 = 8884
   scheme: q.get('scheme') || (_useLocal ? 'ws' : 'wss'),  // 本機無 TLS = ws，雲端 = wss
   user: q.get('user') || '',
@@ -239,40 +245,75 @@ const CFG = {
 };
 const _macDefault = q.get('mac') || localStorage.getItem('clientMac') || '';
 $('#macInput').value = _macDefault;
-const BROKER_WS = `${CFG.scheme}://${CFG.host}:${CFG.port}/mqtt`;
+const BROKER_WS = CFG.host ? `${CFG.scheme}://${CFG.host}:${CFG.port}/mqtt` : '';
 
 function getMac(){ return $('#macInput').value.trim().toLowerCase().replace(/:/g, '') || _macDefault; }
 // Tasmota 統一慣例：device/cmnd/<mac>/POWER（指令）、device/stat/<mac>/POWER（狀態）
 function cmdTopic(){ return 'device/cmnd/' + getMac() + '/POWER'; }
 function stateTopic(){ return 'device/stat/' + getMac() + '/POWER'; }
 
+function diagUpd(){
+  if (!BROKER_WS) { $('#brokerLine').textContent = '沒有指定 broker —— 請用客人連結開啟'; return; }
+  let d = `${CFG.host}:${CFG.port} · ${getMac() || '(未填設備)'}`;
+  if (devOnline === true)       d += ' · 🟢 磨豆機在線';
+  else if (devOnline === false) d += ' · 🔴 磨豆機離線';
+  $('#brokerLine').textContent = d;
+}
+
 function setConn(ok, txt){
   connected = ok;
   $('#conn').className = 'conn ' + (ok ? 'ok' : 'bad');
   $('#connTxt').textContent = txt;
+  diagUpd();
 }
 
 function connect(){
-  if (client) client.end();
   const m = getMac();
   if (!m) { setConn(false, '⚠️ 請先填設備 MAC（12 碼）'); return; }
   if (m.length !== 12) { setConn(false, `⚠️ MAC 只有 ${m.length} 碼（應為 12 碼）`); return; }
+  if (typeof mqtt === 'undefined') { devOnline = null; setConn(false, '❌ MQTT 程式庫沒載入'); return; }
+  if (!BROKER_WS) { devOnline = null; setConn(false, '❌ 這個網址沒帶 broker'); return; }
+
+  // 世代編號：舊連線的事件不准再動到新連線。
+  // （舊版是舊 client 的 close 去 client.end() 掉新 client → 自己咬自己，永遠連不上）
+  const my = ++connGen;
+  if (client) { try { client.end(true); } catch (e) {} client = null; }
+  devOnline = null;
+
   setConn(false, '連線中…');
-  const opts = { clientId: 'c_' + m + '_' + Date.now() };
+  const opts = {
+    clientId: 'c_' + m + '_' + Math.random().toString(16).slice(2, 10),
+    reconnectPeriod: 3000,   // 重連交給 mqtt.js 自己處理，不再手動 recursive connect
+    connectTimeout: 10000,
+    clean: true,
+  };
   if (CFG.user) { opts.username = CFG.user; opts.password = CFG.pass; }   // HiveMQ Cloud 帳密
-  client = mqtt.connect(BROKER_WS, opts);
-  client.on('connect', () => {
+
+  const c = mqtt.connect(BROKER_WS, opts);
+  client = c;
+
+  c.on('connect', () => {
+    if (my !== connGen) return;
     setConn(true, '✅ 已連線');
-    client.subscribe(stateTopic());                            // device/stat/<mac>/POWER
-    client.subscribe('device/stat/' + getMac() + '/RESULT');   // 也收 RESULT（JSON）
-    client.publish(cmdTopic(), '');                            // 空 payload = 查詢 POWER 狀態
+    // 只訂閱、不下令。連上就對 POWER 下令（連空 payload）會讓插頭每次連線都被戳一下，
+    // 而且有些 Tasmota 設定會直接動繼電器 —— 絕對不要在連線時送指令。
+    c.subscribe([stateTopic(), 'device/stat/' + m + '/RESULT',
+                 'device/tele/' + m + '/LWT', 'device/tele/' + m + '/STATE']);
   });
-  client.on('message', (topic, msg) => {
-    const t = topic.toLowerCase();
-    if (t.endsWith('/power')) _relayState = (msg.toString().trim().toUpperCase() === 'ON') ? 1 : 0;
+  c.on('message', (topic, msg) => {
+    if (my !== connGen) return;
+    const t = topic.toLowerCase(), s = msg.toString().trim();
+    if (t.endsWith('/lwt')) { devOnline = (s.toLowerCase() === 'online'); diagUpd(); }
   });
-  client.on('close', () => { setConn(false, '❌ 斷線 · 重連中…'); setTimeout(connect, 3000); });
-  client.on('error', () => {});
+  // 只更新畫面，絕不在這裡再呼叫 connect()
+  c.on('reconnect', () => { if (my === connGen) setConn(false, '🔄 重新連線中…'); });
+  c.on('offline',   () => { if (my === connGen) setConn(false, '❌ 離線 · 自動重連中…'); });
+  c.on('close',     () => { if (my === connGen) setConn(false, '❌ 斷線 · 自動重連中…'); });
+  c.on('error', (e) => {
+    if (my !== connGen) return;
+    devOnline = null;
+    setConn(false, '❌ ' + ((e && e.message) ? e.message : '連線失敗'));
+  });
 }
 connect();
 
