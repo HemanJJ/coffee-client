@@ -122,6 +122,7 @@
 
   /* ── counter ── */
   .counter { text-align:center; font-size:0.95rem; color:var(--muted); margin-top:12px; }
+  .wake { text-align:center; font-size:0.82rem; color:var(--orange); margin-top:6px; display:none; }
 
   /* ── mac ── */
   .mac-row { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
@@ -218,6 +219,9 @@
     <div class="prog-txt" id="gTxt">—</div>
   </div>
 
+  <!-- 防鎖屏狀態 -->
+  <div class="wake" id="wakeBadge"></div>
+
   <!-- counter -->
   <div class="counter" id="counter">本次已磨 0 次</div>
   <div style="text-align:center;margin-top:6px">
@@ -227,7 +231,7 @@
 
 <script src="mqtt.min.js?v=7"></script>
 <script>
-const V = 'v7';      // 版本字串：只在 ?diag=1 時顯示，用來判斷瀏覽器是不是還吃著舊快取
+const V = 'v8';      // 版本字串：只在 ?diag=1 時顯示，用來判斷瀏覽器是不是還吃著舊快取
 const $ = s => document.querySelector(s);
 
 // ── MQTT（Tasmota + HiveMQ Cloud，每租戶一組帳密）──
@@ -483,6 +487,33 @@ sbRender();
 // ── 開始 / 停止 ──
 let grinding=false, stopFlag=false, grindCount=0, grindTimer=null, safetyTimer=null, _relayState=0;
 
+// ── 防鎖屏（Wake Lock API）──
+// 手機鎖屏 → 瀏覽器凍結 JS 計時器、切斷 WebSocket → 磨豆循環會中斷。
+// 磨豆期間請求 wake lock 讓螢幕不自動關；停止時釋放，不浪費電。
+// ⚠️ 只防「螢幕自動關」。使用者手動按電源鍵鎖屏／切到別的 App → 系統會釋放，仍會停。
+let wakeLock=null;
+async function keepAwake(on){
+  const badge=document.getElementById('wakeBadge');
+  if(!('wakeLock' in navigator)){
+    if(badge){ badge.style.display=on?'block':'none'; badge.textContent=on?'⚠️ 此瀏覽器不支援防鎖屏，請手動關閉自動鎖定':''; }
+    return;
+  }
+  try{
+    if(on && !wakeLock){
+      wakeLock=await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release',()=>{ wakeLock=null; });
+      if(badge){ badge.style.display='block'; badge.textContent='🔆 磨豆中，螢幕保持喚醒'; }
+    }else if(!on && wakeLock){
+      await wakeLock.release(); wakeLock=null;
+      if(badge){ badge.style.display='none'; badge.textContent=''; }
+    }
+  }catch(e){
+    if(badge){ badge.style.display='block'; badge.textContent='⚠️ 無法防鎖屏：'+(e.message||e.name); }
+  }
+}
+// 頁面被切走時系統會自動釋放 wake lock；回到前景要重新取得
+document.addEventListener('visibilitychange',()=>{ if(grinding && document.visibilityState==='visible') keepAwake(true); });
+
 $('#counter').textContent = '本次已磨 0 次';
 
 function send(key){
@@ -503,6 +534,7 @@ $('#gStart').onclick=()=>{
     ? '磨豆機沒回應 —— 請確認插頭有電、Wi-Fi 正常'
     : '還沒連上，請稍候');
   stopFlag=false; grinding=true;
+  keepAwake(true);                                  // 🔆 磨豆期間螢幕不自動關
   $('#gStart').disabled=true; $('#gStop').disabled=false;
   $('#gProg').style.display='block';
 
@@ -548,7 +580,7 @@ $('#gStart').onclick=()=>{
     })();
   }
   function finish(){
-    grinding=false; clearTimers();
+    grinding=false; clearTimers(); keepAwake(false);
     send(0); setTimeout(()=>{ if(!grinding) send(0); }, 300);   // 雙重 OFF，蓋掉競態
     $('#gStart').disabled=false; $('#gStop').disabled=true;
     $('#gProg').style.display='none';
@@ -559,7 +591,7 @@ $('#gStart').onclick=()=>{
 // 停止（也給待機到期共用）：先擋住迴圈，再連送兩次 OFF 保險
 function stopAll(){
   stopFlag=true; grinding=false;
-  clearTimers();
+  clearTimers(); keepAwake(false);
   send(0);
   // 三重 OFF（0 / 0.3s / 1.2s）：蓋掉「ON 正在飛」或交界處競態
   setTimeout(()=>{ if(!grinding) send(0); }, 300);
