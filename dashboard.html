@@ -6,9 +6,9 @@
 <title>☕ 磨豆機雲端控制台（老闆端）</title>
 <style>
   :root{
-    --bg:#0a0e14; --panel:#12171f; --card:#161d26; --border:#1e2733;
-    --text:#dde1e8; --muted:#6b7280; --accent:#3b82f6;
-    --green:#22c55e; --red:#ef4444; --yellow:#eab308; --orange:#f97316; --cyan:#06b6d4;
+    --bg:#0d1117; --panel:#161b22; --card:#1c2129; --border:#2a3038;
+    --text:#e6edf3; --muted:#8b98a5; --accent:#3b82f6;
+    --green:#2ea043; --red:#f85149; --yellow:#d29922; --cyan:#58a6ff;
     --radius:12px;
   }
   *{box-sizing:border-box; margin:0; padding:0}
@@ -16,32 +16,31 @@
   h1{font-size:20px; margin-bottom:2px}
   .sub{color:var(--muted); font-size:12.5px; margin-bottom:16px}
   .topbar{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px}
-  .broker{font-size:12.5px; padding:4px 10px; border-radius:999px; border:1px solid var(--border); background:var(--panel)}
-  .broker.up{color:var(--green); border-color:rgba(34,197,94,.35)}
-  .broker.down{color:var(--red); border-color:rgba(239,68,68,.35)}
-  .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px}
+  .broker{font-size:12.5px; padding:4px 10px; border-radius:999px; border:1px solid var(--border); background:var(--panel); color:var(--muted)}
+  .broker.up{color:var(--green); border-color:rgba(46,160,67,.4)}
+  .broker.down{color:var(--red); border-color:rgba(248,81,73,.4)}
+  .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:14px}
   .card{background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:16px}
-  .card.offline{opacity:.55}
   .card .head{display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px}
   .card .name{font-size:16px; font-weight:600}
   .card .mac{font-family:ui-monospace,Menlo,monospace; font-size:11.5px; color:var(--muted)}
   .badges{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px}
   .badge{font-size:11px; padding:2px 8px; border-radius:999px; background:var(--panel); border:1px solid var(--border); color:var(--muted)}
   .badge.plan{color:var(--cyan)}
-  .dot{display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--muted); margin-right:6px; vertical-align:middle}
-  .dot.on{background:var(--green); box-shadow:0 0 8px rgba(34,197,94,.7)}
+  .dot{display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--muted); margin-right:6px; vertical-align:middle}
+  .dot.on{background:var(--green); box-shadow:0 0 8px rgba(46,160,67,.7)}
   .dot.off{background:var(--red)}
-  .status{font-size:13px; margin-bottom:10px}
+  .status{font-size:13px; margin-bottom:10px; min-height:20px}
   .status .st{font-weight:600}
   .meta{display:grid; grid-template-columns:1fr 1fr; gap:4px 12px; font-size:12px; color:var(--muted); margin-bottom:12px}
   .meta b{color:var(--text); font-weight:500}
   .btns{display:flex; gap:8px}
   button{cursor:pointer; border:1px solid var(--border); background:var(--panel); color:var(--text); border-radius:8px; padding:8px 0; font-size:14px; flex:1; transition:filter .15s}
-  button:hover{filter:brightness(1.15)}
-  button.on{border-color:rgba(34,197,94,.5); color:var(--green)}
-  button.off{border-color:rgba(239,68,68,.5); color:var(--red)}
-  button:active{transform:translateY(1px)}
-  button:disabled{opacity:.4; cursor:not-allowed}
+  button:hover:not(:disabled){filter:brightness(1.2)}
+  button.on{border-color:rgba(46,160,67,.5); color:var(--green)}
+  button.off{border-color:rgba(248,81,73,.5); color:var(--red)}
+  button:active:not(:disabled){transform:translateY(1px)}
+  button:disabled{opacity:.35; cursor:not-allowed}
   .foot{color:var(--muted); font-size:11.5px; margin-top:16px; text-align:center}
   .pwbox{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:16px; margin-bottom:16px}
   .pwbox label{display:block; font-size:12px; color:var(--muted); margin-bottom:6px}
@@ -51,7 +50,7 @@
 </head>
 <body>
   <h1>☕ 磨豆機雲端控制台</h1>
-  <div class="sub">老闆端 · 直連 HiveMQ Cloud（WebSocket）· 即時監看與控制全部插頭</div>
+  <div class="sub">老闆端 · 直連 HiveMQ Cloud（WebSocket 8884）· 即時監看與控制全部插頭</div>
 
   <div class="pwbox" id="pwbox" style="display:none">
     <label>請輸入 MQTT 密碼（grinder1 帳號，存本機瀏覽器）</label>
@@ -62,7 +61,7 @@
   </div>
 
   <div class="topbar">
-    <span class="broker" id="brokerTag">⏳ 連線中…</span>
+    <span class="broker" id="brokerTag">⏳ 載入中…</span>
     <span class="sub" style="margin:0" id="brokerDetail"></span>
   </div>
 
@@ -70,105 +69,93 @@
 
   <div class="foot" id="foot"></div>
 
-<script src="mqtt.min.js"></script>
 <script>
-const V = 'd1';   // 版本：?diag=1 時顯示，用來判斷是不是吃到舊快取
-const $ = s => document.querySelector(s);
+var V = 'd2';   // 版本：?diag=1 時顯示，判斷是否吃到舊快取
 
 // ── 設備主檔（與 devices.json 對齊，兩種 topic 格式都支援）──
-// prefix = "device/" → 新標準 FullTopic=device/%prefix%/%topic%/
-// prefix = ""       → 舊 GeekOpen FullTopic=%prefix%/%topic%
-const DEVICES = [
+var DEVICES = [
   { mac:'983dae4d938c', name:'鈞鈞',   topic:'gr-48be8bb6fa', prefix:'',        customer:'王老闆咖啡', plan:'cloud-y' },
   { mac:'983dae50bf84', name:'磨豆機', topic:'983dae50bf84', prefix:'device/', customer:'測試機',    plan:'trial'   },
   { mac:'983dae4fe158', name:'縵',     topic:'983dae4fe158', prefix:'device/', customer:'測試機',    plan:'trial'   },
   { mac:'983dae4fe7b0', name:'leo',    topic:'983dae4fe7b0', prefix:'device/', customer:'測試機',    plan:'trial'   },
 ];
 
-// ── 連線參數：URL ?user=&pass= 可覆寫；沒帶 pass 就跳出密碼框 ──
-const q = new URLSearchParams(location.search);
-const CFG = {
+var q = new URLSearchParams(location.search);
+var CFG = {
   host: q.get('host') || '591aad19d20d466896cf959108d5dc56.s1.eu.hivemq.cloud',
   port: q.get('port') || '8884',
   user: q.get('user') || 'grinder1',
   pass: q.get('pass') || localStorage.getItem('dashPass') || '',
 };
-const BROKER_WS = `wss://${CFG.host}:${CFG.port}/mqtt`;
-const DIAG = q.get('diag') === '1';
+var BROKER_WS = 'wss://' + CFG.host + ':' + CFG.port + '/mqtt';
+var DIAG = q.get('diag') === '1';
 
-// ── 每個設備的 topic ──
 function t(d, kind, suffix){   // kind: cmnd|stat|tele
   return d.prefix + kind + '/' + d.topic + (suffix ? '/' + suffix : '');
 }
 
-// ── 每台設備的執行期狀態 ──
-const st = {};
-DEVICES.forEach(d => st[d.mac] = { name:d.name, mac:d.mac, customer:d.customer, plan:d.plan,
-  online:null, relay:null, signal:null, ssid:null, power:null, lastSeen:0, lwtOff:false });
+// 每台設備執行期狀態
+var st = {};
+DEVICES.forEach(function(d){ st[d.mac] = { name:d.name, mac:d.mac, customer:d.customer, plan:d.plan,
+  online:null, relay:null, signal:null, ssid:null, power:null, lastSeen:0, lwtOff:false }; });
 
-let client = null, connGen = 0, brokerUp = false;
+var client = null, connGen = 0, brokerUp = false, mqttReady = false;
 
+// ── 立即渲染卡片（不依賴 mqtt.js，頁面一開就有內容）──
 function render(){
-  $('#brokerTag').textContent = brokerUp ? '✅ 已連上 HiveMQ Cloud' : '❌ 未連上伺服器';
-  $('#brokerTag').className = 'broker ' + (brokerUp ? 'up' : 'down');
-  $('#brokerDetail').textContent = DIAG ? `${CFG.host}:${CFG.port} · user=${CFG.user} · ${V}` : '';
-  $('#foot').textContent = DIAG ? `${BROKER_WS} · ${V}` : '';
+  var tag = document.getElementById('brokerTag');
+  if (!mqttReady){ tag.textContent = '⏳ 載入連線庫…'; tag.className = 'broker'; }
+  else if (brokerUp){ tag.textContent = '✅ 已連上 HiveMQ Cloud'; tag.className = 'broker up'; }
+  else { tag.textContent = '🔄 連線中…'; tag.className = 'broker'; }
 
-  const now = Date.now();
-  let html = '';
-  DEVICES.forEach(d => {
-    const s = st[d.mac];
-    // 在線 = 90 秒內有收到它的訊息（tele 每 300s，另外每 60s 主動 probe 一次）
-    let online = s.online;
+  document.getElementById('brokerDetail').textContent = DIAG ? (CFG.host + ':' + CFG.port + ' · user=' + CFG.user + ' · ' + V) : '';
+  document.getElementById('foot').textContent = DIAG ? (BROKER_WS + ' · ' + V) : '';
+
+  var now = Date.now();
+  var html = '';
+  DEVICES.forEach(function(d){
+    var s = st[d.mac];
+    var online = s.online;
     if (online !== false && s.lwtOff) online = false;
     if (online === null) online = (now - s.lastSeen) < 90000;
-    const cls = online ? 'on' : 'off';
-    html += `
-      <div class="card ${online ? '' : 'offline'}">
-        <div class="head">
-          <div>
-            <div class="name">${s.name}</div>
-            <div class="mac">${s.mac}</div>
-          </div>
-          <div class="badges">
-            <span class="badge">${s.customer || ''}</span>
-            <span class="badge plan">${s.plan || ''}</span>
-          </div>
-        </div>
-        <div class="status">
-          <span class="dot ${cls}"></span>
-          <span class="st">${online ? '在線' : (s.lwtOff ? '離線' : '確認中…')}</span>
-          ${s.relay ? ` · 繼電器 <b>${s.relay}</b>` : ''}
-        </div>
-        <div class="meta">
-          <span>訊號 <b>${s.signal ?? '—'}${s.signal ? ' dBm' : ''}</b></span>
-          <span>WiFi <b>${s.ssid ?? '—'}</b></span>
-          <span>瓦數 <b>${s.power ?? '—'}${s.power != null ? ' W' : ''}</b></span>
-          <span>最後回報 <b>${s.lastSeen ? Math.round((now - s.lastSeen)/1000) + 's 前' : '—'}</b></span>
-        </div>
-        <div class="btns">
-          <button class="on" ${online ? '' : 'disabled'} data-on="${s.mac}">ON</button>
-          <button class="off" ${online ? '' : 'disabled'} data-off="${s.mac}">OFF</button>
-        </div>
-      </div>`;
+    var cls = online ? 'on' : 'off';
+    var statusTxt = online ? '在線' : (s.lwtOff ? '離線' : '確認中…');
+    var sig = (s.signal != null) ? (s.signal + ' dBm') : '—';
+    var ssi = (s.ssid != null) ? s.ssid : '—';
+    var pwr = (s.power != null) ? (s.power + ' W') : '—';
+    var seen = s.lastSeen ? (Math.round((now - s.lastSeen)/1000) + 's 前') : '—';
+    html += '<div class="card">'
+      + '<div class="head"><div><div class="name">' + s.name + '</div><div class="mac">' + s.mac + '</div></div>'
+      + '<div class="badges"><span class="badge">' + (s.customer || '') + '</span><span class="badge plan">' + (s.plan || '') + '</span></div></div>'
+      + '<div class="status"><span class="dot ' + cls + '"></span><span class="st">' + statusTxt + '</span>'
+      + (s.relay ? ' · 繼電器 <b>' + s.relay + '</b>' : '') + '</div>'
+      + '<div class="meta">'
+      + '<span>訊號 <b>' + sig + '</b></span><span>WiFi <b>' + ssi + '</b></span>'
+      + '<span>瓦數 <b>' + pwr + '</b></span><span>最後回報 <b>' + seen + '</b></span>'
+      + '</div>'
+      + '<div class="btns">'
+      + '<button class="on" ' + (online ? '' : 'disabled') + ' data-on="' + s.mac + '">ON</button>'
+      + '<button class="off" ' + (online ? '' : 'disabled') + ' data-off="' + s.mac + '">OFF</button>'
+      + '</div></div>';
   });
-  $('#grid').innerHTML = html;
+  document.getElementById('grid').innerHTML = html;
 }
 
 function connect(){
-  const my = ++connGen;
+  var my = ++connGen;
   if (client){ try{ client.end(true); }catch(e){} client = null; }
   brokerUp = false;
-  DEVICES.forEach(d => { st[d.mac].online = null; st[d.mac].lwtOff = false; });
+  DEVICES.forEach(function(d){ st[d.mac].online = null; st[d.mac].lwtOff = false; });
   render();
 
   if (!CFG.pass){
-    $('#pwbox').style.display = 'block';
+    document.getElementById('pwbox').style.display = 'block';
     return;
   }
-  $('#pwbox').style.display = 'none';
+  document.getElementById('pwbox').style.display = 'none';
+  if (!mqttReady){ render(); return; }   // mqtt.js 還沒載入，等 onload 再連
 
-  const opts = {
+  var opts = {
     clientId: 'dash_' + Math.random().toString(16).slice(2,10),
     reconnectPeriod: 3000,
     connectTimeout: 10000,
@@ -176,52 +163,50 @@ function connect(){
   };
   if (CFG.user){ opts.username = CFG.user; opts.password = CFG.pass; }
 
-  const c = mqtt.connect(BROKER_WS, opts);
+  var c = mqtt.connect(BROKER_WS, opts);
   client = c;
 
-  c.on('connect', () => {
+  c.on('connect', function(){
     if (my !== connGen) return;
     brokerUp = true; render();
-    const subs = [];
-    DEVICES.forEach(d => {
-      subs.push(t(d,'tele') + '/#');   // STATE / LWT / SENSOR
-      subs.push(t(d,'stat') + '/#');   // POWER / RESULT
+    var subs = [];
+    DEVICES.forEach(function(d){
+      subs.push(t(d,'tele') + '/#');
+      subs.push(t(d,'stat') + '/#');
     });
-    c.subscribe(subs, (err) => {
+    c.subscribe(subs, function(err){
       if (my !== connGen || err) return;
       probeAll(c);
     });
   });
-
-  c.on('message', (topic, msg) => { if (my === connGen) onMsg(topic, msg.toString()); });
-  c.on('reconnect', () => { if (my === connGen){ brokerUp = false; render(); } });
-  c.on('offline',   () => { if (my === connGen){ brokerUp = false; render(); } });
-  c.on('close',     () => { if (my === connGen){ brokerUp = false; render(); } });
-  c.on('error',     () => { if (my === connGen){ brokerUp = false; render(); } });
+  c.on('message', function(topic, msg){ if (my === connGen) onMsg(topic, msg.toString()); });
+  c.on('reconnect', function(){ if (my === connGen){ brokerUp = false; render(); } });
+  c.on('offline',   function(){ if (my === connGen){ brokerUp = false; render(); } });
+  c.on('close',     function(){ if (my === connGen){ brokerUp = false; render(); } });
+  c.on('error',     function(){ if (my === connGen){ brokerUp = false; render(); } });
 }
 
 function onMsg(topic, msg){
-  // 對上哪一台
-  let dev = null;
-  for (const d of DEVICES){
-    const tB = t(d,'tele') + '/', sB = t(d,'stat') + '/';
+  var dev = null;
+  for (var i=0;i<DEVICES.length;i++){
+    var d = DEVICES[i];
+    var tB = t(d,'tele') + '/', sB = t(d,'stat') + '/';
     if (topic.indexOf(tB) === 0 || topic.indexOf(sB) === 0){ dev = d; break; }
   }
   if (!dev) return;
-  const s = st[dev.mac];
+  var s = st[dev.mac];
   s.lastSeen = Date.now();
 
-  if (topic.endsWith('/LWT')){
-    const v = msg.trim().toLowerCase();
+  if (topic.indexOf('/LWT') !== -1){
+    var v = msg.trim().toLowerCase();
     if (v === 'offline'){ s.lwtOff = true; s.online = false; }
     else if (v === 'online'){ s.lwtOff = false; }
     render(); return;
   }
-  // 其餘當 JSON 解析（STATE / SENSOR / POWER / RESULT）
-  let o = null;
+  var o = null;
   try { o = JSON.parse(msg); } catch(e){ return; }
-  let changed = false;
   if (o && typeof o === 'object'){
+    var changed = false;
     if ('POWER' in o){ s.relay = o.POWER; s.online = true; changed = true; }
     if (o.Wifi){
       if (o.Wifi.Signal != null){ s.signal = o.Wifi.Signal; changed = true; }
@@ -229,46 +214,49 @@ function onMsg(topic, msg){
     }
     if (o.ENERGY && o.ENERGY.Power != null){ s.power = o.ENERGY.Power; changed = true; }
     if (changed && (s.online === null || s.online === false)) s.online = true;
+    if (changed) render();
   }
-  if (changed) render();
 }
 
 function probeAll(c){
-  DEVICES.forEach(d => {
-    // State = 純查詢，不會動繼電器；收到回應就代表這台在線
-    c.publish(t(d,'cmnd','State'), '');
-  });
+  DEVICES.forEach(function(d){ c.publish(t(d,'cmnd','State'), ''); });
 }
 
 function setPower(mac, on){
-  const d = DEVICES.find(x => x.mac === mac);
+  for (var i=0;i<DEVICES.length;i++){ if (DEVICES[i].mac === mac){ var d = DEVICES[i]; break; } }
   if (!d || !client) return;
   client.publish(t(d,'cmnd','POWER'), on ? 'ON' : 'OFF');
 }
 
-// 委派點擊（ON/OFF）
-document.addEventListener('click', e => {
-  const b = e.target.closest('button');
+document.addEventListener('click', function(e){
+  var b = e.target.closest('button');
   if (!b) return;
   if (b.dataset.on) setPower(b.dataset.on, true);
   else if (b.dataset.off) setPower(b.dataset.off, false);
 });
 
-// 密碼框
-$('#pwGo').onclick = () => {
-  const p = $('#pwInput').value.trim();
+document.getElementById('pwGo').onclick = function(){
+  var p = document.getElementById('pwInput').value.trim();
   if (!p) return;
   localStorage.setItem('dashPass', p);
   CFG.pass = p;
   connect();
 };
-$('#pwInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#pwGo').click(); });
+document.getElementById('pwInput').addEventListener('keydown', function(e){ if (e.key === 'Enter') document.getElementById('pwGo').click(); });
 
-// 每 5 秒重算一次在線；每 60 秒主動 probe 一次（把離線的、久沒回的都問一遍）
-setInterval(() => render(), 5000);
-setInterval(() => { if (brokerUp && client) probeAll(client); }, 60000);
+// 先畫卡片（不等 mqtt.js）
+render();
 
-connect();
+// 動態載入 mqtt.js，載好才連線（不阻塞頁面渲染）
+var s = document.createElement('script');
+s.src = 'mqtt.min.js?v=7';
+s.onload = function(){ mqttReady = true; connect(); };
+s.onerror = function(){ document.getElementById('brokerTag').textContent = '❌ mqtt.js 載入失敗'; };
+document.body.appendChild(s);
+
+// 每 5 秒重算在線；每 60 秒主動 probe
+setInterval(function(){ render(); }, 5000);
+setInterval(function(){ if (brokerUp && client) probeAll(client); }, 60000);
 </script>
 </body>
 </html>
