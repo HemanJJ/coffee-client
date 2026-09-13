@@ -231,7 +231,7 @@
 
 <script src="mqtt.min.js?v=7"></script>
 <script>
-const V = 'v8';      // 版本字串：只在 ?diag=1 時顯示，用來判斷瀏覽器是不是還吃著舊快取
+const V = 'v9';      // 版本字串：只在 ?diag=1 時顯示，用來判斷瀏覽器是不是還吃著舊快取
 const $ = s => document.querySelector(s);
 
 // ── MQTT（Tasmota + HiveMQ Cloud，每租戶一組帳密）──
@@ -374,6 +374,12 @@ function connect(){
     if (t.endsWith('/result') || t.endsWith('/state') || t.endsWith('/power')) {
       devLive = true;
       if (devOnline !== true) { devOnline = true; renderStatus(); }
+      // 插頭實際狀態 → 驅動磨豆進度（伺服器在跑循環，客人端只觀察、不發指令）
+      if (t.endsWith('/power')) {
+        onRelayState(s.toUpperCase());
+      } else if (t.endsWith('/state')) {
+        try { const j = JSON.parse(s); if (j && j.POWER) onRelayState(String(j.POWER).toUpperCase()); } catch(e){}
+      }
     }
   });
   // 只更新畫面，絕不在這裡再呼叫 connect()
@@ -528,70 +534,80 @@ function clearTimers(){
   grindTimer=null; safetyTimer=null;
 }
 
+// ── 磨豆：指令送伺服器，循環由伺服器跑 ──────────────────────
+// 為什麼：手機一鎖屏，瀏覽器的 JS 計時器會被凍結、WebSocket 被切斷，
+//   磨豆會在磨到一半停掉。所以「循環改由伺服器（Mac mini，24h 常駐）執行」：
+//   客人端只負責 ①送 start/stop ②觀察插頭實際狀態來顯示進度。
+//   手機鎖屏、切 App、關機、沒電 → 磨豆照跑（插頭 PulseTime 看門狗仍是最後保險）。
+function grindTopic(){ return 'device/grind/' + (activeMac || getMac()) + '/cmd'; }
+function grindCmd(action, extra){
+  if(!client||!brokerUp) return false;
+  client.publish(grindTopic(), JSON.stringify(Object.assign({action:action}, extra||{})));
+  return true;
+}
+let srvWaitTimer=null, phaseEndsAt=0, phaseKind='', cycleNo=0, curOn=4, curOff=20;
+
 $('#gStart').onclick=()=>{
   if(grinding) return;
   if(!connected) return alert(devOnline === false
     ? '磨豆機沒回應 —— 請確認插頭有電、Wi-Fi 正常'
     : '還沒連上，請稍候');
-  stopFlag=false; grinding=true;
+  stopFlag=false; grinding=true; cycleNo=0;
   keepAwake(true);                                  // 🔆 磨豆期間螢幕不自動關
   $('#gStart').disabled=true; $('#gStop').disabled=false;
   $('#gProg').style.display='block';
+  $('#gBar').style.width='0%';
+  $('#gTxt').textContent='⏳ 已送指令，等伺服器接手…';
 
-  const offSec=+$('#sOff').value, totalMin=grindMins, startedAt=Date.now();
-  let cycle=0;
+  curOn = kv;
+  curOff = +$('#sOff').value;
+  grindCmd('start', {on:curOn, off:curOff, minutes:grindMins});
 
-  // 進度條 = 「當前這一圈／這階段」的進度（磨豆時條子漲、冷卻時條子漲），秒數同步倒數。
-  // （沿用改版前 pro/index.html 的 tickOn / tickOff 設計，不是全場總進度）
-  function loop(){
-    if(stopFlag||!brokerUp){ send(0); finish(); return; }
-    if(totalMin>0 && (Date.now()-startedAt)>=totalMin*60000){ send(0); finish(); return; }
-
-    cycle++; grindCount++;
-    $('#counter').textContent = '本次已磨 ' + grindCount + ' 次';
-
-    // ── ON 段（紅色，條子漲，秒數倒數）──
-    send(1);
-    safetyTimer=setTimeout(()=>send(0),(kv+0.5)*1000);
-    const onDeadline = Date.now() + kv*1000;
-    (function tickOn(){
-      if (stopFlag) return;
-      const left = Math.max(0, (onDeadline-Date.now())/1000);
-      $('#gBar').style.width = Math.min(100,(1-left/kv)*100)+'%';
-      $('#gBar').className='prog-in on';
-      $('#gTxt').textContent = '🔴 第 ' + cycle + ' 圈 · 磨 ' + left.toFixed(1) + 's';
-      if (left<=0){
-        clearTimeout(safetyTimer);
-        send(0);
-        // ── OFF 段（綠色，條子漲，秒數倒數）──
-        const offDeadline = Date.now() + offSec*1000;
-        (function tickOff(){
-          if (stopFlag) return;
-          const left2 = Math.max(0, (offDeadline-Date.now())/1000);
-          $('#gBar').style.width = Math.min(100,(1-left2/offSec)*100)+'%';
-          $('#gBar').className='prog-in';
-          $('#gTxt').textContent = '🔵 冷卻 ' + Math.ceil(left2) + 's…';
-          if (left2<=0){ loop(); return; }
-          grindTimer=setTimeout(tickOff,100);
-        })();
-        return;
-      }
-      grindTimer=setTimeout(tickOn,80);
-    })();
-  }
-  function finish(){
-    grinding=false; clearTimers(); keepAwake(false);
-    send(0); setTimeout(()=>{ if(!grinding) send(0); }, 300);   // 雙重 OFF，蓋掉競態
-    $('#gStart').disabled=false; $('#gStop').disabled=true;
-    $('#gProg').style.display='none';
-  }
-  loop();
+  // 伺服器沒接手（6 秒內插頭完全沒動作）→ 明確告知，不讓客人乾等
+  clearTimeout(srvWaitTimer);
+  srvWaitTimer=setTimeout(()=>{
+    if(grinding && cycleNo===0){
+      $('#gTxt').textContent='⚠️ 伺服器沒回應 —— 磨豆未啟動（請確認 Mac mini 開著）';
+    }
+  }, 6000);
 };
 
-// 停止（也給待機到期共用）：先擋住迴圈，再連送兩次 OFF 保險
+// 觀察插頭「實際」狀態 → 驅動畫面（客人端不再自己發 ON/OFF）
+function onRelayState(relay){
+  if(!grinding) return;
+  clearTimeout(srvWaitTimer);
+  if(relay==='ON'){
+    cycleNo++; grindCount++;
+    $('#counter').textContent='本次已磨 '+grindCount+' 次';
+    phaseKind='on'; phaseEndsAt=Date.now()+curOn*1000;
+  }else{
+    phaseKind='off'; phaseEndsAt=Date.now()+curOff*1000;
+  }
+  tick();
+}
+function tick(){
+  if(!grinding) return;
+  const dur  = phaseKind==='on' ? curOn : curOff;
+  const left = Math.max(0,(phaseEndsAt-Date.now())/1000);
+  $('#gBar').style.width = Math.min(100,(1-left/Math.max(dur,0.1))*100)+'%';
+  $('#gBar').className='prog-in'+(phaseKind==='on'?' on':'');
+  $('#gTxt').textContent = phaseKind==='on'
+    ? '🔴 第 '+cycleNo+' 圈 · 磨 '+left.toFixed(1)+'s'
+    : '🔵 冷卻 '+Math.ceil(left)+'s…';
+  grindTimer=setTimeout(tick,100);
+}
+function finishGrind(){
+  grinding=false; clearTimers(); clearTimeout(srvWaitTimer); keepAwake(false);
+  $('#gStart').disabled=false; $('#gStop').disabled=true;
+  $('#gProg').style.display='none';
+}
+
+// 停止（也給待機到期共用）：叫伺服器停，自己也直接送 OFF（雙保險，絕不讓它卡在 ON）
 function stopAll(){
-  stopFlag=true; grinding=false;
-  clearTimers(); keepAwake(false);
+  stopFlag=true;
+  grindCmd('stop');                 // 伺服器收到就收工，並保證送 OFF
+  grinding=false;
+  clearTimers(); clearTimeout(srvWaitTimer); keepAwake(false);
   send(0);
   // 三重 OFF（0 / 0.3s / 1.2s）：蓋掉「ON 正在飛」或交界處競態
   setTimeout(()=>{ if(!grinding) send(0); }, 300);
