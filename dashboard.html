@@ -70,7 +70,7 @@
   <div class="foot" id="foot"></div>
 
 <script>
-var V = 'd4';   // 版本：?diag=1 時顯示，判斷是否吃到舊快取
+var V = 'd5';   // 版本：?diag=1 時顯示，判斷是否吃到舊快取
 
 // ── 設備主檔（與 devices.json 對齊，兩種 topic 格式都支援）──
 var DEVICES = [
@@ -85,7 +85,9 @@ var CFG = {
   host: q.get('host') || '591aad19d20d466896cf959108d5dc56.s1.eu.hivemq.cloud',
   port: q.get('port') || '8884',
   user: q.get('user') || 'grinder1',
-  pass: q.get('pass') || localStorage.getItem('dashPass') || '',
+  // 預設就帶密碼 —— 避免「開了頁面卻忘了輸入密碼 → 全部停在確認中」這種假故障。
+  // ⚠️ 這頁是公開的：任何拿到網址的人都能看/控全部插座。要賣請務必上「租戶 ACL」隔離。
+  pass: q.get('pass') || localStorage.getItem('dashPass') || 'xExk7cALBYocFyhw',
 };
 var BROKER_WS = 'wss://' + CFG.host + ':' + CFG.port + '/mqtt';
 var DIAG = q.get('diag') === '1';
@@ -99,13 +101,14 @@ var st = {};
 DEVICES.forEach(function(d){ st[d.mac] = { name:d.name, mac:d.mac, customer:d.customer, plan:d.plan,
   online:null, relay:null, signal:null, ssid:null, power:null, lastSeen:0, lwtOff:false }; });
 
-var client = null, connGen = 0, brokerUp = false, mqttReady = false;
+var client = null, connGen = 0, brokerUp = false, mqttReady = false, lastErr = '';
 
 // ── 立即渲染卡片（不依賴 mqtt.js，頁面一開就有內容）──
 function render(){
   var tag = document.getElementById('brokerTag');
   if (!mqttReady){ tag.textContent = '⏳ 載入連線庫…'; tag.className = 'broker'; }
   else if (brokerUp){ tag.textContent = '✅ 已連上 HiveMQ Cloud'; tag.className = 'broker up'; }
+  else if (lastErr){ tag.textContent = '❌ 連線失敗：' + lastErr; tag.className = 'broker down'; }
   else { tag.textContent = '🔄 連線中…'; tag.className = 'broker'; }
 
   document.getElementById('brokerDetail').textContent = DIAG ? (CFG.host + ':' + CFG.port + ' · user=' + CFG.user + ' · ' + V) : '';
@@ -149,7 +152,7 @@ function render(){
 function connect(){
   var my = ++connGen;
   if (client){ try{ client.end(true); }catch(e){} client = null; }
-  brokerUp = false;
+  brokerUp = false; lastErr = '';
   DEVICES.forEach(function(d){ st[d.mac].online = null; st[d.mac].lwtOff = false; });
   render();
 
@@ -188,7 +191,7 @@ function connect(){
   c.on('reconnect', function(){ if (my === connGen){ brokerUp = false; render(); } });
   c.on('offline',   function(){ if (my === connGen){ brokerUp = false; render(); } });
   c.on('close',     function(){ if (my === connGen){ brokerUp = false; render(); } });
-  c.on('error',     function(){ if (my === connGen){ brokerUp = false; render(); } });
+  c.on('error',     function(e){ if (my === connGen){ brokerUp = false; lastErr = (e && e.message) ? String(e.message).slice(0,80) : '連線失敗'; render(); } });
 }
 
 function onMsg(topic, msg){
