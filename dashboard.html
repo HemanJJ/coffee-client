@@ -70,7 +70,7 @@
   <div class="foot" id="foot"></div>
 
 <script>
-var V = 'd2';   // 版本：?diag=1 時顯示，判斷是否吃到舊快取
+var V = 'd3';   // 版本：?diag=1 時顯示，判斷是否吃到舊快取
 
 // ── 設備主檔（與 devices.json 對齊，兩種 topic 格式都支援）──
 var DEVICES = [
@@ -244,15 +244,40 @@ document.getElementById('pwGo').onclick = function(){
 };
 document.getElementById('pwInput').addEventListener('keydown', function(e){ if (e.key === 'Enter') document.getElementById('pwGo').click(); });
 
-// 先畫卡片（不等 mqtt.js）
+// 先畫卡片（用內建清單當後備）；接著抓 devices.json 更新，新插頭登錄後就會自動出現
 render();
 
-// 動態載入 mqtt.js，載好才連線（不阻塞頁面渲染）
-var s = document.createElement('script');
-s.src = 'mqtt.min.js?v=7';
-s.onload = function(){ mqttReady = true; connect(); };
-s.onerror = function(){ document.getElementById('brokerTag').textContent = '❌ mqtt.js 載入失敗'; };
-document.body.appendChild(s);
+// devices.json 由燒錄腳本自動推到這裡（跟 dashboard.html 同目錄）
+fetch('devices.json?t=' + Date.now())
+  .then(function(r){ return r.ok ? r.json() : null; })
+  .then(function(j){
+    if (j && j.devices && j.devices.length){
+      DEVICES = j.devices.map(function(d){
+        return {
+          mac: d.mac,
+          name: d.name || d.mac,
+          topic: d.topic || d.mac,
+          prefix: (d.prefix === undefined ? 'device/' : d.prefix),
+          customer: d.customer || '',
+          plan: d.plan || ''
+        };
+      });
+      DEVICES.forEach(function(d){
+        if (!st[d.mac]) st[d.mac] = { name:d.name, mac:d.mac, customer:d.customer, plan:d.plan,
+          online:null, relay:null, signal:null, ssid:null, power:null, lastSeen:0, lwtOff:false };
+      });
+      render();
+    }
+  })
+  .catch(function(){})
+  .then(function(){
+    // 動態載入 mqtt.js，載好才連線（不阻塞頁面渲染）
+    var s = document.createElement('script');
+    s.src = 'mqtt.min.js?v=7';
+    s.onload = function(){ mqttReady = true; connect(); };
+    s.onerror = function(){ document.getElementById('brokerTag').textContent = '❌ mqtt.js 載入失敗'; };
+    document.body.appendChild(s);
+  });
 
 // 每 5 秒重算在線；每 60 秒主動 probe
 setInterval(function(){ render(); }, 5000);

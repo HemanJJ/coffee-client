@@ -1,0 +1,53 @@
+{
+  "_comment": "設備主檔 —— 三台插頭的唯一來源。每台的 topic / prefix / customer / plan 都在這裡。",
+  "_topic_note": "Tasmota 有兩種 FullTopic：新=device/%prefix%/%topic%/ → prefix='device/'；舊=%prefix%/%topic%/ → prefix=''。dashboard.py 會依各台的 prefix 組主題。",
+  "broker": {
+    "host": "591aad19d20d466896cf959108d5dc56.s1.eu.hivemq.cloud",
+    "port": 8883,
+    "tls": true,
+    "user": "grinder1"
+  },
+  "devices": [
+    {
+      "mac": "983dae4d938c",
+      "name": "鈞鈞",
+      "topic": "gr-48be8bb6fa",
+      "prefix": "",
+      "customer": "王老闆咖啡",
+      "plan": "cloud-y",
+      "note": "舊 GeekOpen 時期佈署：Topic=gr-48be8bb6fa、FullTopic 無 device/ 前綴"
+    },
+    {
+      "mac": "983dae50bf84",
+      "name": "磨豆機",
+      "topic": "983dae50bf84",
+      "prefix": "device/",
+      "customer": "測試機",
+      "plan": "trial"
+    },
+    {
+      "mac": "983dae4fe158",
+      "name": "縵",
+      "topic": "983dae4fe158",
+      "prefix": "device/",
+      "customer": "測試機",
+      "plan": "trial"
+    },
+    {
+      "mac": "983dae4fe7b0",
+      "name": "leo",
+      "topic": "983dae4fe7b0",
+      "prefix": "device/",
+      "customer": "測試機",
+      "plan": "trial"
+    },
+    {
+      "mac": "983dae50ca38",
+      "name": "測試leo",
+      "topic": "983dae50ca38",
+      "prefix": "device/",
+      "customer": "測試機",
+      "plan": "trial"
+    }
+  ]
+}
