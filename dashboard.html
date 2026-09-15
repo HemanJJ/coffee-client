@@ -70,7 +70,7 @@
   <div class="foot" id="foot"></div>
 
 <script>
-var V = 'd3';   // 版本：?diag=1 時顯示，判斷是否吃到舊快取
+var V = 'd4';   // 版本：?diag=1 時顯示，判斷是否吃到舊快取
 
 // ── 設備主檔（與 devices.json 對齊，兩種 topic 格式都支援）──
 var DEVICES = [
@@ -115,11 +115,16 @@ function render(){
   var html = '';
   DEVICES.forEach(function(d){
     var s = st[d.mac];
-    var online = s.online;
-    if (online !== false && s.lwtOff) online = false;
-    if (online === null) online = (now - s.lastSeen) < 90000;
+    // 在線判斷（跟 Mac mini dashboard 一致，避免「狀態對不上」）：
+    //   · 收到 LWT Offline        → 一定離線
+    //   · 90 秒內有收到任何訊息（LWT / tele / stat / State 回覆）→ 在線
+    //   · 從沒收到過              → 確認中…
+    var fresh = (s.lastSeen > 0) && ((now - s.lastSeen) < 90000);
+    var online = (!s.lwtOff) && fresh;
     var cls = online ? 'on' : 'off';
-    var statusTxt = online ? '在線' : (s.lwtOff ? '離線' : '確認中…');
+    var statusTxt = online ? '在線'
+                  : (s.lwtOff ? '離線'
+                              : (s.lastSeen ? '離線（>90 秒沒回報）' : '確認中…'));
     var sig = (s.signal != null) ? (s.signal + ' dBm') : '—';
     var ssi = (s.ssid != null) ? s.ssid : '—';
     var pwr = (s.power != null) ? (s.power + ' W') : '—';
