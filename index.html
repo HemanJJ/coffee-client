@@ -231,7 +231,7 @@
 
 <script src="mqtt.min.js?v=7"></script>
 <script>
-const V = 'v9';      // 版本字串：只在 ?diag=1 時顯示，用來判斷瀏覽器是不是還吃著舊快取
+const V = 'v10';      // 版本字串：只在 ?diag=1 時顯示，用來判斷瀏覽器是不是還吃著舊快取
 const $ = s => document.querySelector(s);
 
 // ── MQTT（Tasmota + HiveMQ Cloud，每租戶一組帳密）──
@@ -257,18 +257,26 @@ const CFG = {
 };
 const _macDefault = q.get('mac') || localStorage.getItem('clientMac') || '';
 $('#macInput').value = _macDefault;
+// 每台插頭的 topic / prefix 可能不同：
+//   本專案標準  Topic=完整MAC    FullTopic=device/%prefix%/%topic%/  → prefix='device/'
+//   舊 GeekOpen Topic=gr-xxxxxx  FullTopic=%prefix%/%topic%/         → prefix=''
+// 客人連結可帶 ?topic=&prefix= 明示（prefix= 空字串代表「無前綴」）；沒帶就沿用標準，向後相容。
+const _topicParam  = q.get('topic');     // null = 沒給
+const _prefixParam = q.get('prefix');    // null = 沒給；'' = 明示空前綴
 const BROKER_WS = CFG.host ? `${CFG.scheme}://${CFG.host}:${CFG.port}/mqtt` : '';
 // ?diag=1 → 診斷列顯示完整技術資訊（broker 網址 / MAC / 版本）。
 // 客人端預設不顯示，只有真的出問題才跳一行白話警告。
 const DIAG = q.get('diag') === '1';
 
 function getMac(){ return $('#macInput').value.trim().toLowerCase().replace(/:/g, '') || _macDefault; }
-// Tasmota 統一慣例：device/cmnd/<mac>/POWER（指令）、device/stat/<mac>/POWER（狀態）
+// 這條連線實際用的 topic / prefix
 // ⚠️ 一律用 activeMac —— 也就是「這條連線實際訂閱的對象」，不是輸入框的即時值。
 //    兩者一旦不一致，畫面就會「標籤寫 A、狀態其實是 B」，
 //    於是出現「明明不在線卻顯示在線」這種鬼故事。
-function cmdTopic(){ return 'device/cmnd/' + (activeMac || getMac()) + '/POWER'; }
-function stateTopic(){ return 'device/stat/' + (activeMac || getMac()) + '/POWER'; }
+function devTopic(){ return _topicParam || activeMac || getMac(); }
+function devPrefix(){ return (_prefixParam !== null) ? _prefixParam : 'device/'; }
+function cmdTopic(){ return devPrefix() + 'cmnd/' + devTopic() + '/POWER'; }
+function stateTopic(){ return devPrefix() + 'stat/' + devTopic() + '/POWER'; }
 
 // ── 狀態顯示 ──────────────────────────────────────────────
 // ⚠️ 這裡以前只反映「瀏覽器有沒有連上 broker」，所以磨豆機明明不在線，
@@ -351,11 +359,13 @@ function connect(){
     // 收到任何 stat/tele 回應才算在線；逾時沒回應就是不在。
     // ⚠️ 探測一定要等 subscribe 的回呼才送：訂閱是非同步的，
     //    先送再訂會漏掉設備的回應 → 明明在線卻被判成「沒回應」。
-    c.subscribe([stateTopic(), 'device/stat/' + m + '/RESULT',
-                 'device/tele/' + m + '/LWT', 'device/tele/' + m + '/STATE'],
+    const _stB = devPrefix() + 'stat/' + devTopic();
+    const _teB = devPrefix() + 'tele/' + devTopic();
+    c.subscribe([stateTopic(), _stB + '/RESULT',
+                 _teB + '/LWT', _teB + '/STATE'],
       (err) => {
         if (my !== connGen || err) return;
-        c.publish('device/cmnd/' + m + '/State', '');
+        c.publish(devPrefix() + 'cmnd/' + devTopic() + '/State', '');
       });
     setTimeout(() => {
       if (my !== connGen || !brokerUp || devLive) return;
@@ -539,7 +549,7 @@ function clearTimers(){
 //   磨豆會在磨到一半停掉。所以「循環改由伺服器（Mac mini，24h 常駐）執行」：
 //   客人端只負責 ①送 start/stop ②觀察插頭實際狀態來顯示進度。
 //   手機鎖屏、切 App、關機、沒電 → 磨豆照跑（插頭 PulseTime 看門狗仍是最後保險）。
-function grindTopic(){ return 'device/grind/' + (activeMac || getMac()) + '/cmd'; }
+function grindTopic(){ return devPrefix() + 'grind/' + devTopic() + '/cmd'; }
 function grindCmd(action, extra){
   if(!client||!brokerUp) return false;
   client.publish(grindTopic(), JSON.stringify(Object.assign({action:action}, extra||{})));
