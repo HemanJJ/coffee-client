@@ -231,7 +231,7 @@
 
 <script src="mqtt.min.js?v=7"></script>
 <script>
-const V = 'v10';      // 版本字串：只在 ?diag=1 時顯示，用來判斷瀏覽器是不是還吃著舊快取
+const V = 'v11';      // 版本字串：只在 ?diag=1 時顯示，用來判斷瀏覽器是不是還吃著舊快取
 const $ = s => document.querySelector(s);
 
 // ── MQTT（Tasmota + HiveMQ Cloud，每租戶一組帳密）──
@@ -274,7 +274,11 @@ function getMac(){ return $('#macInput').value.trim().toLowerCase().replace(/:/g
 //    兩者一旦不一致，畫面就會「標籤寫 A、狀態其實是 B」，
 //    於是出現「明明不在線卻顯示在線」這種鬼故事。
 function devTopic(){ return _topicParam || activeMac || getMac(); }
-function devPrefix(){ return (_prefixParam !== null) ? _prefixParam : 'device/'; }
+function devPrefix(){
+  if (_prefixParam === null) return 'device/';              // 沒給 → 本專案標準
+  if (_prefixParam === 'none' || _prefixParam === '-') return '';  // 明示「無前綴」
+  return _prefixParam;
+}
 function cmdTopic(){ return devPrefix() + 'cmnd/' + devTopic() + '/POWER'; }
 function stateTopic(){ return devPrefix() + 'stat/' + devTopic() + '/POWER'; }
 
