@@ -48,6 +48,14 @@
       "prefix": "device/",
       "customer": "測試機",
       "plan": "trial"
+    },
+    {
+      "mac": "983dae4fda38",
+      "name": "彭鈞鈞",
+      "topic": "983dae4fda38",
+      "prefix": "device/",
+      "customer": "彭老闆",
+      "plan": "trial"
     }
   ]
 }
